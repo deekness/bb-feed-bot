@@ -34,8 +34,10 @@ nicknames: {}
 bluesky_accounts:
   - bigbrothernetwork.bsky.social
   - bbliveupdaters.bsky.social
-  - hamsterwatch.bsky.social
+  - hamsterwatch.com
   - bigbrotherjunkie.bsky.social
+  - amikebloomtype.bsky.social
+  - taranarmstrong.bsky.social
 
 # Generic, season-agnostic keywords that mark a post as BB-related.
 # (Roster names are also treated as relevance signals automatically.)
