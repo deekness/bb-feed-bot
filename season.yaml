@@ -38,6 +38,8 @@ bluesky_accounts:
   - bigbrotherjunkie.bsky.social
   - amikebloomtype.bsky.social
   - taranarmstrong.bsky.social
+  - bbfeedsfairy.bsky.social
+  - bblionotev.bsky.social
 
 # Generic, season-agnostic keywords that mark a post as BB-related.
 # (Roster names are also treated as relevance signals automatically.)
