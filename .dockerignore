@@ -1,0 +1,13 @@
+.git
+.gitignore
+__pycache__/
+*.pyc
+.venv/
+venv/
+logs/
+*.log
+*.db
+.env
+*.env
+_smoke.py
+*.zip

@@ -1,0 +1,57 @@
+# ============================================================================
+# PER-SEASON CONFIG
+# Copy this to season.yaml and edit it once the cast is announced.
+# This is the ONLY file you need to change between seasons.
+# ============================================================================
+
+season_number: 28
+season_name: "Big Brother 28"
+
+# Used to compute "Day N" and the current game week. Set to premiere date.
+season_start_date: "2026-07-09"
+
+# Live-feed updates RSS feed (Jokers Updates).
+rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
+
+# ----------------------------------------------------------------------------
+# ROSTER — the heart of the system.
+# Houseguest/alliance extraction is GROUNDED in this list: anything that does
+# not resolve to a name here is discarded. This is what kills the old bot's
+# "random word became an alliance member" problem. Leave empty until the cast
+# is revealed, then fill in the full first-name list.
+# ----------------------------------------------------------------------------
+roster: []
+  # - Alice
+  # - Bob
+  # - Charlie
+
+# Map common nicknames/typos -> canonical roster name (case-insensitive).
+nicknames: {}
+  # kat: Katherine
+  # vinny: Vince
+
+# Bluesky accounts to monitor (handles). These are season-agnostic feeds.
+bluesky_accounts:
+  - bigbrothernetwork.bsky.social
+  - bbliveupdaters.bsky.social
+  - hamsterwatch.bsky.social
+
+# Generic, season-agnostic keywords that mark a post as BB-related.
+# (Roster names are also treated as relevance signals automatically.)
+bb_keywords:
+  - "big brother"
+  - "bb live"
+  - "live feeds"
+  - "houseguest"
+  - "head of household"
+  - "hoh"
+  - "power of veto"
+  - "veto"
+  - "nomination"
+  - "nominated"
+  - "eviction"
+  - "evicted"
+  - "alliance"
+  - "showmance"
+  - "diary room"
+  - "have not"
