@@ -150,8 +150,9 @@ class BBCommands(commands.Cog):
         if self.bot.settings.owner_id and interaction.user.id != self.bot.settings.owner_id:
             await interaction.response.send_message("Owner only.", ephemeral=True)
             return
+        await interaction.response.defer(ephemeral=True)
         synced = await self.bot.tree.sync()
-        await interaction.response.send_message(f"Synced {len(synced)} commands.", ephemeral=True)
+        await interaction.followup.send(f"Synced {len(synced)} commands.", ephemeral=True)
 
     @staticmethod
     def _fmt_alliance(a: dict) -> str:
