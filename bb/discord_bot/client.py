@@ -37,7 +37,8 @@ log = logging.getLogger("bb.bot")
 
 class BBBot(commands.Bot):
     def __init__(self, settings: Settings, season: Season):
-        intents = discord.Intents.default()  # no privileged intents needed
+        intents = discord.Intents.default()
+        intents.members = True  # needed to pick a random member for /zing
         super().__init__(command_prefix="!bb", intents=intents)
 
         self.settings = settings
@@ -65,7 +66,9 @@ class BBBot(commands.Bot):
     async def setup_hook(self) -> None:
         await self.db.connect()
         from .commands import BBCommands
+        from .zings import ZingCog
         await self.add_cog(BBCommands(self))
+        await self.add_cog(ZingCog(self))
         synced = await self.tree.sync()
         log.info("synced %d slash commands", len(synced))
 
