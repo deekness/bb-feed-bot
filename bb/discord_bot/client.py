@@ -137,6 +137,9 @@ class BBBot(commands.Bot):
             updates = await self.db.updates_between(
                 hour_start.astimezone(dt.timezone.utc),
                 hour_end.astimezone(dt.timezone.utc))
+            in_season = dt.datetime.now(self.tz).date() >= self.season.start_date
+            if not updates and not in_season:
+                return  # off-season quiet hour: stay silent (in-season posts hourly regardless)
             label = hour_end.strftime("%I %p").lstrip("0")
             for embed in await self.summarizer.hourly(updates, label):
                 await channel.send(embed=embed)
@@ -160,6 +163,8 @@ class BBBot(commands.Bot):
             if not channel:
                 return
             updates = await self.db.recent_updates(24)
+            if not updates and now.date() < self.season.start_date:
+                return  # off-season: stay quiet
             embed = await self.summarizer.whats_happening(updates)
             embed.title = f"Day {self.game_state.current_day(now.date())} Recap"
             await channel.send(embed=embed)
