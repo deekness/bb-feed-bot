@@ -35,6 +35,7 @@ bluesky_accounts:
   - bigbrothernetwork.bsky.social
   - bbliveupdaters.bsky.social
   - hamsterwatch.bsky.social
+  - bigbrotherjunkie.bsky.social
 
 # Generic, season-agnostic keywords that mark a post as BB-related.
 # (Roster names are also treated as relevance signals automatically.)
