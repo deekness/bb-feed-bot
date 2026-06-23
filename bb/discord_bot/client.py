@@ -100,6 +100,11 @@ class BBBot(commands.Bot):
         perms = getattr(interaction.user, "guild_permissions", None)
         return bool(perms and perms.administrator)
 
+    def _in_season(self) -> bool:
+        """True once the premiere date (from season.yaml) has arrived. Before that
+        the bot ingests in the background but posts nothing to the channel."""
+        return dt.datetime.now(self.tz).date() >= self.season.start_date
+
     # --- loops --------------------------------------------------------------
     @tasks.loop(minutes=2)
     async def ingest_loop(self) -> None:
@@ -109,7 +114,7 @@ class BBBot(commands.Bot):
                 return
 
             channel = await self.update_channel()
-            if channel:
+            if channel and self._in_season():
                 for u in new_updates:
                     if is_urgent(u):
                         await channel.send(embed=discord.Embed(
@@ -128,6 +133,8 @@ class BBBot(commands.Bot):
     @tasks.loop(minutes=60)
     async def hourly_loop(self) -> None:
         try:
+            if not self._in_season():
+                return  # off-season: no hourly posts at all until the season starts
             channel = await self.update_channel()
             if not channel:
                 return
@@ -137,9 +144,6 @@ class BBBot(commands.Bot):
             updates = await self.db.updates_between(
                 hour_start.astimezone(dt.timezone.utc),
                 hour_end.astimezone(dt.timezone.utc))
-            in_season = dt.datetime.now(self.tz).date() >= self.season.start_date
-            if not updates and not in_season:
-                return  # off-season quiet hour: stay silent (in-season posts hourly regardless)
             label = hour_end.strftime("%I %p").lstrip("0")
             for embed in await self.summarizer.hourly(updates, label):
                 await channel.send(embed=embed)
@@ -155,6 +159,9 @@ class BBBot(commands.Bot):
                 return
             self._last_daily = now.date()
 
+            if not self._in_season():
+                return  # off-season: no daily recap until the season starts
+
             dissolved = await self.alliances.decay()
             if dissolved:
                 log.info("daily decay dissolved %d alliances", dissolved)
@@ -163,8 +170,6 @@ class BBBot(commands.Bot):
             if not channel:
                 return
             updates = await self.db.recent_updates(24)
-            if not updates and now.date() < self.season.start_date:
-                return  # off-season: stay quiet
             embed = await self.summarizer.whats_happening(updates)
             embed.title = f"Day {self.game_state.current_day(now.date())} Recap"
             await channel.send(embed=embed)
