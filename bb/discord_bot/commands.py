@@ -104,6 +104,98 @@ class BBCommands(commands.Cog):
                                 value=", ".join(names), inline=True)
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="ask", description="Ask a question about anything that happened on the feeds.")
+    @app_commands.describe(question="e.g. 'Why are Sarah and Mike fighting?'")
+    async def ask(self, interaction: discord.Interaction, question: str):
+        if not 3 <= len(question) <= 300:
+            await interaction.response.send_message("Question must be 3–300 characters.", ephemeral=True)
+            return
+        await interaction.response.defer()
+        import datetime as _dt
+        matches = await self.bot.db.search_updates(question, limit=40)
+        end = _dt.datetime.now(_dt.timezone.utc)
+        dailies = await self.bot.db.summaries_between("daily", end - _dt.timedelta(days=7), end)
+        context = await self.bot.house_context()
+        embed = await self.bot.summarizer.ask(question, matches, dailies, context)
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="votes", description="Where the eviction votes stand this week.")
+    async def votes(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        week = self.bot.game_state.current_week()
+        counts = await self.bot.votes.current(week)
+        embed = discord.Embed(title=f"🗳️ Vote Count — Week {week}",
+                              color=0xE67E22, timestamp=discord.utils.utcnow())
+        if not counts:
+            embed.description = "No evidenced vote plans tracked yet this week."
+        else:
+            ranked = sorted(counts.items(), key=lambda kv: len(kv[1]), reverse=True)
+            for target, voters in ranked:
+                embed.add_field(name=f"To evict {target} — {len(voters)}",
+                                value=", ".join(voters), inline=False)
+            embed.set_footer(text="Latest stated plan per voter. Houseguests flip — "
+                                  "treat this as a snapshot, not a lock.")
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="houseguest", description="Everything tracked about one houseguest.")
+    async def houseguest(self, interaction: discord.Interaction, name: str):
+        await interaction.response.defer()
+        hg = self.bot.roster.resolve(name)
+        if not hg:
+            await interaction.followup.send(f"'{name}' isn't on the roster.", ephemeral=True)
+            return
+        embed = discord.Embed(title=f"👤 {hg}", color=0x2980B9,
+                              timestamp=discord.utils.utcnow())
+
+        rows = await self.bot.db.fetch(
+            "SELECT week, role FROM game_state WHERE houseguest = $1 ORDER BY week, role", hg)
+        if rows:
+            comp = "\n".join(f"Week {r['week']}: {r['role'].replace('_', ' ')}" for r in rows[:15])
+            embed.add_field(name="Game history", value=comp, inline=False)
+
+        alliances = await self.bot.alliances.for_houseguest(hg)
+        if alliances:
+            lines = []
+            for a in alliances[:6]:
+                lock = "🔒 " if a["locked"] else ""
+                label = a["name"] or "/".join(a["members"])
+                lines.append(f"{lock}**{label}** — {', '.join(a['members'])} ({a['confidence']:.0%})")
+            embed.add_field(name="Alliances", value="\n".join(lines), inline=False)
+
+        rels = await self.bot.relationships.for_houseguest(hg)
+        if rels:
+            lines = []
+            for r in rels[:8]:
+                tag = f" ({r['label']})" if r["label"] else ""
+                arrow = "📈" if r["affinity"] > 0 else "📉" if r["affinity"] < 0 else "➖"
+                lines.append(f"{arrow} **{r['other']}**{tag} {r['affinity']:+.2f}")
+            embed.add_field(name="Relationships", value="\n".join(lines), inline=False)
+
+        mentions = await self.bot.db.count_mentions(hg, 7)
+        embed.set_footer(text=f"Mentioned in {mentions} feed updates over the last 7 days")
+        if not rows and not alliances and not rels:
+            embed.description = "Nothing tracked yet."
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="week", description="Recap of a full game week (default: last completed).")
+    async def week(self, interaction: discord.Interaction, number: int | None = None):
+        await interaction.response.defer()
+        import datetime as _dt
+        current = self.bot.game_state.current_week()
+        number = number or max(1, current - 1)
+        if not 1 <= number <= current:
+            await interaction.followup.send(f"Week must be 1–{current}.", ephemeral=True)
+            return
+        start_date = self.bot.season.start_date + _dt.timedelta(days=7 * (number - 1))
+        end_date = start_date + _dt.timedelta(days=7)
+        tz = self.bot.tz
+        start = _dt.datetime.combine(start_date, _dt.time.min, tz).astimezone(_dt.timezone.utc)
+        end = _dt.datetime.combine(end_date, _dt.time.max, tz).astimezone(_dt.timezone.utc)
+        dailies = await self.bot.db.summaries_between("daily", start, end)
+        context = await self.bot.house_context()
+        embed = await self.bot.summarizer.weekly_recap(dailies, number, context)
+        await interaction.followup.send(embed=embed)
+
     # --- admin --------------------------------------------------------------
     @app_commands.command(name="confirmalliance", description="(Admin) Lock an alliance as real.")
     async def confirmalliance(self, interaction: discord.Interaction, alliance_id: int):

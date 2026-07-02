@@ -33,12 +33,31 @@ from ..roster import Roster
 from ..trackers.alliances import AllianceTracker
 from ..trackers.game_state import GameStateTracker
 from ..trackers.relationships import RelationshipTracker
+from ..trackers.votes import VoteTracker
 
 log = logging.getLogger("bb.bot")
 
 _ROLE_LABELS = {"hoh": "HOH", "nominee": "Nominees", "veto_winner": "Veto winner",
                 "veto_used_on": "Veto used on", "evicted": "Evicted",
                 "replacement_nominee": "Replacement nominee"}
+
+# Quiet-hour material. BB tradition: the ants are the house's longest-running
+# alliance. Capped at 3 consecutive posts — the third signs off, then the bot
+# stays silent until the feeds produce something.
+ANT_LINES = [
+    "No updates this hour. The ants remain the most active competitors in the house.",
+    "Quiet hour on the feeds. The ant alliance, however, has never been stronger — undefeated since BB6.",
+    "Nothing to report. The ants just won their 47th consecutive kitchen comp.",
+    "All quiet. Somewhere in the storage room, the ants are holding a house meeting.",
+    "Feeds are calm. The ants have formed a six-legged voting bloc and refuse to be evicted.",
+    "No houseguest activity. The ants, meanwhile, are running laps in the honey jar someone left out.",
+    "Nothing happening — unless you count the ants studying the memory wall.",
+    "Quiet hour. Production has still not addressed the ants. The ants know this.",
+    "Zero updates. The ants have declared themselves Head of Household by squatter's rights.",
+    "Feeds are sleepy. The ants are the only ones campaigning right now.",
+]
+ANT_SIGNOFF = ("Still quiet. Even the ants have gone to bed — I'll pipe back up "
+               "when something actually happens.")
 
 
 class BBBot(commands.Bot):
@@ -65,9 +84,14 @@ class BBBot(commands.Bot):
         self.alliances = AllianceTracker(self.db)
         self.relationships = RelationshipTracker(self.db)
         self.game_state = GameStateTracker(self.db, season.start_date)
+        self.votes = VoteTracker(self.db)
 
         self._last_daily: dt.date | None = None
+        self._last_weekly: int = 0
         self._recent_for_context: list = []  # last few processed updates
+        self._quiet_streak: int = 0
+        self._ant_bag: list[str] = []
+        self._live_mode: bool = False
 
     # --- lifecycle ----------------------------------------------------------
     async def setup_hook(self) -> None:
@@ -107,6 +131,23 @@ class BBBot(commands.Bot):
         perms = getattr(interaction.user, "guild_permissions", None)
         return bool(perms and perms.administrator)
 
+    def episode_now(self) -> dict | None:
+        """The episode window we are currently inside, or None.
+        Returned dict has 'live': True for the Thursday live show."""
+        now = dt.datetime.now(self.tz)
+        minutes = now.hour * 60 + now.minute
+        for ep in self.season.episodes:
+            if now.weekday() == ep["weekday"] and ep["start_min"] <= minutes < ep["end_min"]:
+                return ep
+        return None
+
+    def _next_ant_line(self) -> str:
+        if not self._ant_bag:
+            import random
+            self._ant_bag = ANT_LINES[:]
+            random.shuffle(self._ant_bag)
+        return self._ant_bag.pop()
+
     def _in_season(self) -> bool:
         """True once the premiere date (from season.yaml) has arrived. Before that
         the bot ingests in the background but posts nothing to the channel."""
@@ -140,13 +181,35 @@ class BBBot(commands.Bot):
     @tasks.loop(minutes=2)
     async def ingest_loop(self) -> None:
         try:
+            episode = self.episode_now()
+
+            # Live-show mode: poll every 30s during the Thursday live window so
+            # the Blockbuster result and the eviction land fast.
+            want_live = bool(episode and episode["live"] and self._in_season())
+            if want_live != self._live_mode:
+                self._live_mode = want_live
+                if want_live:
+                    self.ingest_loop.change_interval(seconds=30)
+                    log.info("live-show mode ON: polling every 30s")
+                else:
+                    self.ingest_loop.change_interval(minutes=2)
+                    log.info("live-show mode OFF: polling every 2m")
+
             new_updates = await self.pipeline.run()
             if not new_updates:
                 return
 
+            # During a NON-live episode (Wed/Sun), Bluesky posts are episode
+            # chatter recapping old footage: never Breaking-worthy and never
+            # allowed to write hard facts. RSS (feeds-only) stays trusted.
+            recap_airing = bool(episode and not episode["live"])
+            hash_src = {u.content_hash: u.source for u in new_updates}
+
             channel = await self.update_channel()
             if channel and self._in_season():
                 for u in new_updates:
+                    if recap_airing and u.source == "bluesky":
+                        continue
                     if is_urgent(u):
                         desc = u.text[:1400]
                         if u.link:
@@ -161,10 +224,20 @@ class BBBot(commands.Bot):
                     new_updates,
                     context_updates=self._recent_for_context[-10:],
                     house_context=context,
+                    episode_airing=recap_airing,
                 )
+                if recap_airing:
+                    extraction.game_events = [
+                        e for e in extraction.game_events
+                        if hash_src.get(e.source_hash) != "bluesky"]
+                    extraction.vote_plans = [
+                        v for v in extraction.vote_plans
+                        if hash_src.get(v.source_hash) != "bluesky"]
                 await self.alliances.ingest(extraction.alliances)
                 await self.relationships.ingest(extraction.relationships)
                 await self.game_state.ingest(extraction.game_events)
+                await self.votes.ingest(extraction.vote_plans,
+                                        self.game_state.current_week())
 
             # Keep a small rolling window for the next extraction's context.
             self._recent_for_context = (self._recent_for_context + new_updates)[-10:]
@@ -181,7 +254,19 @@ class BBBot(commands.Bot):
             end_utc = hour_end.astimezone(dt.timezone.utc)
             updates = await self.db.updates_between(start_utc, end_utc)
             if not updates:
-                return  # quiet hour: post nothing, store nothing
+                # Quiet hour: the ants take over — but only for 3 in a row,
+                # then silence until the feeds wake back up.
+                self._quiet_streak += 1
+                if self._in_season() and self._quiet_streak <= 3:
+                    channel = await self.update_channel()
+                    if channel:
+                        line = ANT_SIGNOFF if self._quiet_streak == 3 else self._next_ant_line()
+                        await channel.send(embed=discord.Embed(
+                            title=f"🐜 House Summary — {hour_end.strftime('%I %p').lstrip('0')}",
+                            description=line, color=0x95A5A6,
+                            timestamp=dt.datetime.now(self.tz)))
+                return
+            self._quiet_streak = 0
 
             context = await self.house_context()
             label = hour_end.strftime("%I %p").lstrip("0")
@@ -235,6 +320,19 @@ class BBBot(commands.Bot):
                 await self.db.add_summary("daily", start_utc, end_utc,
                                           embed.description,
                                           sum(h["update_count"] for h in hourlies) or len(fallback))
+
+            # Weekly recap: on the first morning of a new game week, reduce the
+            # just-completed week's daily recaps into a week story.
+            days_in = (now.date() - self.season.start_date).days
+            if days_in >= 7 and days_in % 7 == 0:
+                completed = days_in // 7
+                if completed > self._last_weekly:
+                    self._last_weekly = completed
+                    wk_end = end_utc
+                    wk_start = wk_end - dt.timedelta(days=7)
+                    dailies = await self.db.summaries_between("daily", wk_start, wk_end)
+                    wembed = await self.summarizer.weekly_recap(dailies, completed, context)
+                    await channel.send(embed=wembed)
         except Exception as e:
             log.error("daily loop error: %s", e)
 

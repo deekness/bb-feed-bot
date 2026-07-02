@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 
 from ..llm import LLM
-from ..models import AllianceProposal, Extraction, GameEvent, RelationshipChange
+from ..models import AllianceProposal, Extraction, GameEvent, RelationshipChange, VotePlan
 from ..roster import Roster
 
 log = logging.getLogger("bb.analysis.extract")
@@ -95,8 +95,25 @@ _SCHEMA = {
                 "required": ["role", "houseguest", "confidence", "evidence", "source_index"],
             },
         },
+        "vote_plans": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "voter": {"type": "string",
+                              "description": "The houseguest casting the vote."},
+                    "target": {"type": "string",
+                               "description": "Who the voter says they will vote to EVICT."},
+                    "confidence": {"type": "number",
+                                   "description": "0..1: only stated/clearly implied vote intentions."},
+                    "evidence": {"type": "string"},
+                    "source_index": _SRC_IDX,
+                },
+                "required": ["voter", "target", "confidence", "evidence", "source_index"],
+            },
+        },
     },
-    "required": ["alliances", "relationship_changes", "game_state"],
+    "required": ["alliances", "relationship_changes", "game_state", "vote_plans"],
 }
 
 
@@ -106,7 +123,7 @@ class Extractor:
         self.roster = roster
 
     async def extract(self, updates: list, context_updates: list | None = None,
-                      house_context: str = "") -> Extraction:
+                      house_context: str = "", episode_airing: bool = False) -> Extraction:
         """Extract from `updates` (NEW). `context_updates` are recent,
         already-processed items shown for disambiguation only.
         `house_context` is a short current-state block (week, HOH, noms,
@@ -135,8 +152,18 @@ class Extractor:
             "- Every item must include a short supporting quote in 'evidence' and the "
             "source_index of the NEW update it came from. If you cannot quote support, "
             "do not include the item.\n"
+            "- A vote plan requires the voter stating or clearly implying who they "
+            "will vote to evict this week — not who they dislike.\n"
             "- Return empty arrays rather than guessing."
         )
+        if episode_airing:
+            system += (
+                "\n\nIMPORTANT: A pre-recorded TV episode is airing right now. Some "
+                "updates may be people reacting to OLD events shown on the episode, "
+                "not live feed events. If an update reads like episode commentary or "
+                "recaps something already in the CURRENT HOUSE STATE, do not extract "
+                "game-state facts or vote plans from it, or use very low confidence."
+            )
 
         parts = []
         if house_context:
@@ -203,8 +230,21 @@ class Extractor:
                 source_hash=src(g),
             ))
 
-        log.info("extraction: %d alliances, %d relationship changes, %d game events",
-                 len(result.alliances), len(result.relationships), len(result.game_events))
+        for v in data.get("vote_plans", []) or []:
+            voter = self.roster.resolve(v.get("voter"))
+            target = self.roster.resolve(v.get("target"))
+            if not voter or not target or voter == target:
+                continue
+            result.vote_plans.append(VotePlan(
+                voter=voter, target=target,
+                confidence=_clamp(v.get("confidence", 0.5)),
+                evidence=str(v.get("evidence", ""))[:500],
+                source_hash=src(v),
+            ))
+
+        log.info("extraction: %d alliances, %d relationship changes, %d game events, %d vote plans",
+                 len(result.alliances), len(result.relationships), len(result.game_events),
+                 len(result.vote_plans))
         return result
 
 

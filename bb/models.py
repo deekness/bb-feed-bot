@@ -55,7 +55,17 @@ class GameEvent:
 
 
 @dataclass(slots=True)
+class VotePlan:
+    voter: str              # canonical roster name
+    target: str             # who they plan to vote to EVICT
+    confidence: float
+    evidence: str
+    source_hash: str = ""
+
+
+@dataclass(slots=True)
 class Extraction:
     alliances: list[AllianceProposal] = field(default_factory=list)
     relationships: list[RelationshipChange] = field(default_factory=list)
     game_events: list[GameEvent] = field(default_factory=list)
+    vote_plans: list[VotePlan] = field(default_factory=list)

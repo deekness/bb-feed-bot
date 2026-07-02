@@ -144,6 +144,22 @@ class AllianceTracker:
         )
         return [dict(r) for r in rows]
 
+    async def for_houseguest(self, name: str) -> list[dict]:
+        rows = await self.db.fetch(
+            """
+            SELECT a.id, a.name, a.status, a.confidence, a.locked,
+                   array_agg(m2.houseguest ORDER BY m2.houseguest) AS members
+            FROM alliances a
+            JOIN alliance_members m ON m.alliance_id = a.id AND m.active AND m.houseguest = $1
+            JOIN alliance_members m2 ON m2.alliance_id = a.id AND m2.active
+            WHERE a.status IN ('forming', 'active', 'fracturing')
+            GROUP BY a.id
+            ORDER BY a.confidence DESC
+            """,
+            name,
+        )
+        return [dict(r) for r in rows]
+
     async def confirm(self, alliance_id: int) -> bool:
         result = await self.db.execute(
             "UPDATE alliances SET locked = TRUE, status = 'active', confidence = 1.0 WHERE id = $1",

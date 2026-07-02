@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS game_state (
     PRIMARY KEY (week, role, houseguest)
 );
 
+CREATE TABLE IF NOT EXISTS vote_plans (
+    week        INT NOT NULL,
+    voter       TEXT NOT NULL,
+    target      TEXT NOT NULL,
+    confidence  REAL NOT NULL DEFAULT 0,
+    evidence    TEXT DEFAULT '',
+    source_hash TEXT DEFAULT '',
+    updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (week, voter)
+);
+
 CREATE TABLE IF NOT EXISTS summaries (
     id           BIGSERIAL PRIMARY KEY,
     kind         TEXT NOT NULL,             -- 'hourly' | 'daily'
@@ -167,6 +178,42 @@ class Database:
             hours,
         )
         return [self._to_update(r) for r in rows]
+
+    # --- search (powers /ask) -------------------------------------------------
+    async def search_updates(self, query: str, limit: int = 40) -> list[Update]:
+        """Full-text search over the archive, newest first. Falls back to ILIKE
+        if the tsquery parses to nothing (e.g. all stop-words)."""
+        rows = await self.fetch(
+            """
+            SELECT content_hash, source, author, title, body, link, published_at
+            FROM updates
+            WHERE to_tsvector('english', title || ' ' || body)
+                  @@ plainto_tsquery('english', $1)
+            ORDER BY published_at DESC
+            LIMIT $2
+            """,
+            query, limit,
+        )
+        if not rows:
+            rows = await self.fetch(
+                """
+                SELECT content_hash, source, author, title, body, link, published_at
+                FROM updates WHERE title ILIKE '%' || $1 || '%' OR body ILIKE '%' || $1 || '%'
+                ORDER BY published_at DESC LIMIT $2
+                """,
+                query, limit,
+            )
+        return [self._to_update(r) for r in rows]
+
+    async def count_mentions(self, name: str, days: int = 7) -> int:
+        return await self.fetchval(
+            """
+            SELECT count(*) FROM updates
+            WHERE ingested_at > now() - make_interval(days => $2)
+              AND (title ILIKE '%' || $1 || '%' OR body ILIKE '%' || $1 || '%')
+            """,
+            name, days,
+        ) or 0
 
     # --- summaries (map-reduce store for daily/weekly recaps) ----------------
     async def add_summary(self, kind: str, period_start: datetime,

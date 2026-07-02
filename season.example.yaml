@@ -55,3 +55,35 @@ bb_keywords:
   - "showmance"
   - "diary room"
   - "have not"
+
+# ----------------------------------------------------------------------------
+# EPISODE SCHEDULE (times are in the bot's TIMEZONE env, 24h HH:MM).
+# During a NON-live episode (Wed/Sun), Bluesky posts are treated as episode
+# chatter: they cannot trigger Breaking posts or write game state, because
+# accounts live-posting the episode are recapping days-old feed events.
+# Jokers RSS is feeds-only and stays fully trusted. During a LIVE episode
+# (Thursday), everything flows normally AND polling speeds up to 30s so the
+# Blockbuster result and the eviction land fast.
+# ----------------------------------------------------------------------------
+# CBS schedule (Central): Sun 7pm, Wed 7pm (90 min), live Thu 7pm.
+# Sunday padded to 20:30 to cover 90-minute exceptions (e.g. July 12).
+# Thursday window covers the 90-minute premiere (July 9).
+# Friday = BB Unlocked (alternate Fridays, clip show): pure old footage,
+# so it gets the non-live treatment too; harmless on off-weeks.
+episodes:
+  - day: wednesday
+    start: "19:00"
+    end: "20:30"
+    live: false
+  - day: thursday
+    start: "19:00"
+    end: "20:30"
+    live: true
+  - day: sunday
+    start: "19:00"
+    end: "20:30"
+    live: false
+  - day: friday
+    start: "19:00"
+    end: "20:00"
+    live: false

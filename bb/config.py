@@ -18,6 +18,27 @@ from pathlib import Path
 import yaml
 
 
+_DAYS = {"monday": 0, "tuesday": 1, "wednesday": 2, "thursday": 3,
+         "friday": 4, "saturday": 5, "sunday": 6}
+
+
+def _parse_episodes(raw: list) -> list[dict]:
+    """[{day, start 'HH:MM', end 'HH:MM', live}] -> [{weekday, start_min, end_min, live}]"""
+    out = []
+    for e in raw or []:
+        try:
+            day = _DAYS[str(e["day"]).strip().lower()]
+            sh, sm = str(e["start"]).split(":")
+            eh, em = str(e["end"]).split(":")
+            out.append({"weekday": day,
+                        "start_min": int(sh) * 60 + int(sm),
+                        "end_min": int(eh) * 60 + int(em),
+                        "live": bool(e.get("live", False))})
+        except (KeyError, ValueError, TypeError):
+            continue
+    return out
+
+
 @dataclass(frozen=True)
 class Season:
     number: int
@@ -28,6 +49,7 @@ class Season:
     nicknames: dict[str, str]
     bluesky_accounts: list[str]
     bb_keywords: list[str]
+    episodes: list[dict] = field(default_factory=list)
 
     @classmethod
     def load(cls, path: str | Path) -> "Season":
@@ -47,6 +69,7 @@ class Season:
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
             bb_keywords=[str(k).lower() for k in (data.get("bb_keywords") or [])],
+            episodes=_parse_episodes(data.get("episodes")),
         )
 
 

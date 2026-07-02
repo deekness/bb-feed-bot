@@ -137,6 +137,78 @@ class Summarizer:
         embed.set_footer(text=f"Built from {len(hourly_summaries)} hourly summaries • {total} updates")
         return embed
 
+    # --- /ask: natural-language Q&A over the archive -------------------------
+    async def ask(self, question: str, matches: list[Update],
+                  recent_dailies: list[dict], house_context: str = "") -> discord.Embed:
+        if not self.llm.available:
+            return discord.Embed(
+                title="Ask", color=0x95A5A6,
+                description="LLM is off — /ask needs it. Try /summary instead.")
+        if not matches and not recent_dailies:
+            return discord.Embed(
+                title=f"❓ {question[:230]}", color=0x95A5A6,
+                description="I couldn't find anything in the feed archive about that.")
+
+        parts = [self._ctx(house_context)] if house_context else []
+        if recent_dailies:
+            days = "\n\n".join(
+                f"[{d['period_end'].astimezone(self.tz).strftime('%b %d')}]\n{d['content'][:1200]}"
+                for d in recent_dailies[-5:])
+            parts.append(f"RECENT DAILY RECAPS (background):\n{days}")
+        if matches:
+            found = "\n".join(
+                f"- [{u.published_at.astimezone(self.tz).strftime('%b %d %I:%M %p')}] {self._trim(u.text, 300)}"
+                for u in matches[:40])
+            parts.append(f"FEED UPDATES MATCHING THE QUESTION (newest first):\n{found}")
+        parts.append(
+            f"QUESTION: {question}\n\n"
+            "Answer using only the material above. Be specific about who/when. "
+            "If the archive doesn't fully answer it, say what is and isn't known. "
+            "Stay neutral toward every houseguest. 2-6 sentences or a short list.")
+
+        text = await self.llm.text(_NEUTRALITY, "\n\n".join(parts),
+                                   max_tokens=800, temperature=0.3)
+        embed = discord.Embed(
+            title=f"❓ {question[:230]}",
+            description=(text or "Couldn't produce an answer — try rewording.")[:4000],
+            color=0x1ABC9C, timestamp=datetime.now(self.tz),
+        )
+        embed.set_footer(text=f"Searched archive: {len(matches)} matching updates")
+        return embed
+
+    # --- weekly recap (reduce over stored daily summaries) -------------------
+    async def weekly_recap(self, dailies: list[dict], week_number: int,
+                           house_context: str = "") -> discord.Embed:
+        if not dailies:
+            return discord.Embed(
+                title=f"Week {week_number} Recap", color=0x95A5A6,
+                description="No daily recaps stored for that week yet.")
+        if not self.llm.available:
+            body = "\n\n".join(
+                f"**{d['period_end'].astimezone(self.tz).strftime('%A %b %d')}**\n{d['content'][:500]}"
+                for d in dailies)
+            return discord.Embed(title=f"Week {week_number} Recap",
+                                 description=body[:4000], color=0x8E44AD)
+        blocks = "\n\n".join(
+            f"[{d['period_end'].astimezone(self.tz).strftime('%A %b %d')}]\n{d['content']}"
+            for d in dailies)
+        user = (
+            f"{self._ctx(house_context)}"
+            f"Below are the daily recaps for week {week_number} in the Big Brother "
+            "house. Write the week's story:\n"
+            "1. A paragraph on the week's arc (HOH -> noms -> veto -> eviction if known).\n"
+            "2. 5-8 bullets of key developments, chronological.\n"
+            f"3. One line on where things stand going into next week.\n\nDAILY RECAPS:\n\n{blocks}"
+        )
+        text = await self.llm.text(_NEUTRALITY, user, max_tokens=1200, temperature=0.4)
+        embed = discord.Embed(
+            title=f"📆 Week {week_number} Recap",
+            description=(text or "Recap generation failed.")[:4000],
+            color=0x8E44AD, timestamp=datetime.now(self.tz),
+        )
+        embed.set_footer(text=f"Built from {len(dailies)} daily recaps")
+        return embed
+
     # --- LLM paths ----------------------------------------------------------
     async def _llm_digest(self, updates: list[Update], hour_label: str,
                           house_context: str) -> discord.Embed | None:
