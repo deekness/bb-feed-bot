@@ -27,10 +27,10 @@ class AllianceTracker:
     def __init__(self, db: Database):
         self.db = db
 
-    async def ingest(self, proposals: list, source_hash: str = "") -> None:
+    async def ingest(self, proposals: list) -> None:
         for p in proposals:
             try:
-                await self._ingest_one(p, source_hash)
+                await self._ingest_one(p, getattr(p, "source_hash", ""))
             except Exception as e:
                 log.error("alliance ingest failed: %s", e)
 

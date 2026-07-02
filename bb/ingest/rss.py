@@ -1,16 +1,30 @@
 """RSS source (Jokers Updates live-feed RSS)."""
 from __future__ import annotations
 
+import html
 import logging
+import re
 from datetime import datetime, timezone
 
 import aiohttp
 import feedparser
 
 from ..models import Update
-from .dedup import content_hash
+from .dedup import content_hash, hash_from_uid
 
 log = logging.getLogger("bb.ingest.rss")
+
+_TAG = re.compile(r"<[^>]+>")
+_WS = re.compile(r"\s+")
+
+
+def _clean_html(text: str) -> str:
+    """Strip tags and unescape entities so downstream text is plain."""
+    if not text:
+        return ""
+    text = _TAG.sub(" ", text)
+    text = html.unescape(text)
+    return _WS.sub(" ", text).strip()
 
 
 class RSSSource:
@@ -33,14 +47,19 @@ class RSSSource:
         updates: list[Update] = []
         for entry in feed.entries:
             try:
-                title = entry.get("title", "").strip()
-                body = entry.get("description", "").strip()
+                title = _clean_html(entry.get("title", ""))
+                body = _clean_html(entry.get("description", ""))
                 link = entry.get("link", "")
                 published = self._published(entry)
                 if not title and not body:
                     continue
+                # Prefer the feed's stable per-item ID: distinct events with
+                # similar wording (constant on live feeds) must not collide.
+                uid = entry.get("id") or entry.get("guid") or link
+                h = hash_from_uid(uid) if uid else content_hash(
+                    title, f"{body}|{published.isoformat()}")
                 updates.append(Update(
-                    content_hash=content_hash(title, body),
+                    content_hash=h,
                     source=self.name,
                     author=entry.get("author", ""),
                     title=title, body=body, link=link, published_at=published,

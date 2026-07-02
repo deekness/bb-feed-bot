@@ -29,7 +29,7 @@ class GameStateTracker:
         today = today or date.today()
         return max(1, (today - self.season_start).days + 1)
 
-    async def ingest(self, events: list, source_hash: str = "") -> None:
+    async def ingest(self, events: list) -> None:
         week = self.current_week()
         for e in events:
             if e.confidence < _MIN_CONFIDENCE:
@@ -43,10 +43,38 @@ class GameStateTracker:
                     SET confidence = GREATEST(game_state.confidence, EXCLUDED.confidence),
                         set_at = now()
                     """,
-                    week, e.role, e.houseguest, e.confidence, source_hash,
+                    week, e.role, e.houseguest, e.confidence,
+                    getattr(e, "source_hash", ""),
                 )
             except Exception as ex:
                 log.error("game-state ingest failed: %s", ex)
+
+    async def set_fact(self, role: str, houseguest: str,
+                       week: int | None = None) -> None:
+        """Admin override: record a fact at full confidence."""
+        week = week or self.current_week()
+        await self.db.execute(
+            """
+            INSERT INTO game_state (week, role, houseguest, confidence, source_hash)
+            VALUES ($1, $2, $3, 1.0, 'admin')
+            ON CONFLICT (week, role, houseguest) DO UPDATE
+            SET confidence = 1.0, source_hash = 'admin', set_at = now()
+            """,
+            week, role, houseguest,
+        )
+
+    async def remove_fact(self, role: str, houseguest: str,
+                          week: int | None = None) -> bool:
+        """Admin override: delete a wrong fact. Returns True if a row was removed."""
+        week = week or self.current_week()
+        result = await self.db.execute(
+            "DELETE FROM game_state WHERE week = $1 AND role = $2 AND houseguest = $3",
+            week, role, houseguest,
+        )
+        try:
+            return int(result.split()[-1]) > 0
+        except (ValueError, IndexError, AttributeError):
+            return False
 
     async def current(self, week: int | None = None) -> dict[str, list[str]]:
         week = week or self.current_week()

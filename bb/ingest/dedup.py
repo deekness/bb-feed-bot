@@ -17,6 +17,13 @@ _HANDLE = re.compile(r"[@#]\w+")
 _WS = re.compile(r"\s+")
 
 
+def hash_from_uid(uid: str) -> str:
+    """Hash a source-provided unique ID (RSS GUID/link). Preferred when the
+    source has stable per-item IDs: unlike text normalization, two distinct
+    events with similar wording (common on live-feed updates) never collide."""
+    return hashlib.md5(uid.strip().encode("utf-8")).hexdigest()
+
+
 def content_hash(title: str, body: str) -> str:
     raw = f"{title or ''} {body or ''}".lower()
     raw = _TIME.sub("", raw)

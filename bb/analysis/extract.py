@@ -6,6 +6,14 @@ alliances / relationship changes / game-state facts via a forced tool call
 roster. Anything that does not resolve is discarded, so "random word became
 an alliance" cannot happen.
 
+Context: per-poll batches are tiny (often 1-3 items), so the model also gets
+(a) the current game state + active alliances, and (b) the last few
+already-processed updates, marked CONTEXT ONLY. It extracts facts only from
+the NEW updates; context exists purely for disambiguation.
+
+Attribution: each extracted item carries a source_index pointing at the
+numbered NEW update it came from, so evidence rows link to the right update.
+
 Neutrality: the prompt instructs the model to report only what is evidenced,
 with a supporting quote, and to treat all houseguests equally. There is no
 per-houseguest handling here or downstream.
@@ -23,9 +31,14 @@ log = logging.getLogger("bb.analysis.extract")
 _TOOL_NAME = "record_house_dynamics"
 _TOOL_DESCRIPTION = (
     "Record ONLY the alliances, relationship changes, and game-state facts that "
-    "are directly stated or clearly evidenced in the provided feed updates. Use "
+    "are directly stated or clearly evidenced in the NEW feed updates. Use "
     "empty arrays when nothing qualifies. Never infer beyond the text."
 )
+
+_SRC_IDX = {
+    "type": "integer",
+    "description": "The number of the NEW update this item is evidenced by.",
+}
 
 _SCHEMA = {
     "type": "object",
@@ -45,8 +58,9 @@ _SCHEMA = {
                                    "description": "0..1: how strongly the updates support this alliance."},
                     "evidence": {"type": "string",
                                  "description": "Short quote/paraphrase from the updates supporting this."},
+                    "source_index": _SRC_IDX,
                 },
-                "required": ["members", "status", "confidence", "evidence"],
+                "required": ["members", "status", "confidence", "evidence", "source_index"],
             },
         },
         "relationship_changes": {
@@ -60,8 +74,9 @@ _SCHEMA = {
                              "enum": ["allied", "conflict", "betrayal",
                                       "showmance_start", "showmance_end"]},
                     "evidence": {"type": "string"},
+                    "source_index": _SRC_IDX,
                 },
-                "required": ["houseguests", "kind", "evidence"],
+                "required": ["houseguests", "kind", "evidence", "source_index"],
             },
         },
         "game_state": {
@@ -75,8 +90,9 @@ _SCHEMA = {
                     "houseguest": {"type": "string"},
                     "confidence": {"type": "number"},
                     "evidence": {"type": "string"},
+                    "source_index": _SRC_IDX,
                 },
-                "required": ["role", "houseguest", "confidence", "evidence"],
+                "required": ["role", "houseguest", "confidence", "evidence", "source_index"],
             },
         },
     },
@@ -89,12 +105,18 @@ class Extractor:
         self.llm = llm
         self.roster = roster
 
-    async def extract(self, updates: list) -> Extraction:
+    async def extract(self, updates: list, context_updates: list | None = None,
+                      house_context: str = "") -> Extraction:
+        """Extract from `updates` (NEW). `context_updates` are recent,
+        already-processed items shown for disambiguation only.
+        `house_context` is a short current-state block (week, HOH, noms,
+        active alliances) built by the caller."""
         if not self.llm.available or not updates or self.roster.is_empty:
             return Extraction()
 
         roster_str = ", ".join(self.roster.names)
         lines = [f"{i}. {u.text}" for i, u in enumerate(updates, 1)]
+
         system = (
             "You are a neutral Big Brother live-feed analyst. You extract factual "
             "house dynamics from update text. You are strictly even-handed: you do "
@@ -103,18 +125,30 @@ class Extractor:
             f"The ONLY valid houseguests this season are: {roster_str}. Never output "
             "a name that is not in this list. If a name is ambiguous, omit it.\n\n"
             "Rules:\n"
+            "- Extract ONLY from the NEW updates. The CURRENT HOUSE STATE and "
+            "CONTEXT sections exist purely to help you interpret the new text — "
+            "never re-report facts that appear only there.\n"
             "- An alliance requires an explicit agreement or working relationship in "
             "the text — not merely two people talking. If unsure, lower the confidence "
             "or omit it.\n"
             "- Only give an alliance a name if the houseguests themselves named it.\n"
-            "- Every item must include a short supporting quote in 'evidence'. If you "
-            "cannot quote support, do not include the item.\n"
+            "- Every item must include a short supporting quote in 'evidence' and the "
+            "source_index of the NEW update it came from. If you cannot quote support, "
+            "do not include the item.\n"
             "- Return empty arrays rather than guessing."
         )
-        user = (
-            "Extract the alliances, relationship changes, and game-state facts that "
-            "are evidenced in these updates:\n\n" + "\n".join(lines)
+
+        parts = []
+        if house_context:
+            parts.append(f"CURRENT HOUSE STATE (context only):\n{house_context}")
+        if context_updates:
+            ctx = "\n".join(f"- {u.text}" for u in context_updates)
+            parts.append(f"RECENT UPDATES ALREADY PROCESSED (context only):\n{ctx}")
+        parts.append(
+            "NEW updates — extract alliances, relationship changes, and game-state "
+            "facts evidenced in these:\n" + "\n".join(lines)
         )
+        user = "\n\n".join(parts)
 
         data = await self.llm.structured(
             system, user, tool_name=_TOOL_NAME, tool_description=_TOOL_DESCRIPTION,
@@ -122,10 +156,19 @@ class Extractor:
         )
         if not data:
             return Extraction()
-        return self._validate(data)
+        return self._validate(data, updates)
 
-    def _validate(self, data: dict) -> Extraction:
+    def _validate(self, data: dict, updates: list) -> Extraction:
         result = Extraction()
+
+        def src(item: dict) -> str:
+            try:
+                i = int(item.get("source_index", 0))
+                if 1 <= i <= len(updates):
+                    return updates[i - 1].content_hash
+            except (TypeError, ValueError):
+                pass
+            return updates[0].content_hash if updates else ""
 
         for a in data.get("alliances", []) or []:
             members = self.roster.resolve_all(a.get("members", []) or [])
@@ -137,6 +180,7 @@ class Extractor:
                 confidence=_clamp(a.get("confidence", 0.5)),
                 evidence=str(a.get("evidence", ""))[:500],
                 name=_clean_name(a.get("name")),
+                source_hash=src(a),
             ))
 
         for r in data.get("relationship_changes", []) or []:
@@ -156,6 +200,7 @@ class Extractor:
                 role=str(g.get("role", "")), houseguest=hg,
                 confidence=_clamp(g.get("confidence", 0.5)),
                 evidence=str(g.get("evidence", ""))[:500],
+                source_hash=src(g),
             ))
 
         log.info("extraction: %d alliances, %d relationship changes, %d game events",

@@ -79,6 +79,17 @@ CREATE TABLE IF NOT EXISTS game_state (
     PRIMARY KEY (week, role, houseguest)
 );
 
+CREATE TABLE IF NOT EXISTS summaries (
+    id           BIGSERIAL PRIMARY KEY,
+    kind         TEXT NOT NULL,             -- 'hourly' | 'daily'
+    period_start TIMESTAMPTZ NOT NULL,
+    period_end   TIMESTAMPTZ NOT NULL,
+    content      TEXT NOT NULL,
+    update_count INT NOT NULL DEFAULT 0,
+    created_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_summaries_kind_end ON summaries(kind, period_end);
+
 CREATE TABLE IF NOT EXISTS bot_kv (
     key        TEXT PRIMARY KEY,
     value      JSONB,
@@ -133,10 +144,13 @@ class Database:
         return row is not None
 
     async def updates_between(self, start: datetime, end: datetime) -> list[Update]:
+        """Window on ingested_at: an item published at 10:58 but fetched at
+        11:01 (after the 11:00 digest ran) must land in the NEXT window rather
+        than falling between summaries and being lost forever."""
         rows = await self.fetch(
             """
             SELECT content_hash, source, author, title, body, link, published_at
-            FROM updates WHERE published_at >= $1 AND published_at < $2
+            FROM updates WHERE ingested_at >= $1 AND ingested_at < $2
             ORDER BY published_at ASC
             """,
             start, end,
@@ -147,12 +161,37 @@ class Database:
         rows = await self.fetch(
             """
             SELECT content_hash, source, author, title, body, link, published_at
-            FROM updates WHERE published_at > now() - make_interval(hours => $1)
+            FROM updates WHERE ingested_at > now() - make_interval(hours => $1)
             ORDER BY published_at DESC
             """,
             hours,
         )
         return [self._to_update(r) for r in rows]
+
+    # --- summaries (map-reduce store for daily/weekly recaps) ----------------
+    async def add_summary(self, kind: str, period_start: datetime,
+                          period_end: datetime, content: str,
+                          update_count: int) -> None:
+        await self.execute(
+            """
+            INSERT INTO summaries (kind, period_start, period_end, content, update_count)
+            VALUES ($1, $2, $3, $4, $5)
+            """,
+            kind, period_start, period_end, content, update_count,
+        )
+
+    async def summaries_between(self, kind: str, start: datetime,
+                                end: datetime) -> list[dict]:
+        rows = await self.fetch(
+            """
+            SELECT period_start, period_end, content, update_count
+            FROM summaries
+            WHERE kind = $1 AND period_end > $2 AND period_end <= $3
+            ORDER BY period_end ASC
+            """,
+            kind, start, end,
+        )
+        return [dict(r) for r in rows]
 
     @staticmethod
     def _to_update(r) -> Update:

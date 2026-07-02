@@ -35,6 +35,7 @@ class AllianceProposal:
     confidence: float      # 0..1
     evidence: str
     name: str | None = None
+    source_hash: str = ""  # content_hash of the update the evidence came from
 
 
 @dataclass(slots=True)
@@ -50,6 +51,7 @@ class GameEvent:
     houseguest: str
     confidence: float
     evidence: str
+    source_hash: str = ""  # content_hash of the update the evidence came from
 
 
 @dataclass(slots=True)

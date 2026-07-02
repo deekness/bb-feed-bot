@@ -27,7 +27,8 @@ class BBCommands(commands.Cog):
     async def wtf(self, interaction: discord.Interaction):
         await interaction.response.defer()
         updates = await self.bot.db.recent_updates(24)
-        embed = await self.bot.summarizer.whats_happening(updates)
+        context = await self.bot.house_context()
+        embed = await self.bot.summarizer.whats_happening(updates, context)
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="summary", description="Summarize the last N hours (default 24).")
@@ -37,7 +38,8 @@ class BBCommands(commands.Cog):
             return
         await interaction.response.defer()
         updates = await self.bot.db.recent_updates(hours)
-        embed = await self.bot.summarizer.whats_happening(updates)
+        context = await self.bot.house_context()
+        embed = await self.bot.summarizer.whats_happening(updates, context)
         embed.title = f"Summary — last {hours}h"
         await interaction.followup.send(embed=embed)
 
@@ -120,6 +122,44 @@ class BBCommands(commands.Cog):
         ok = await self.bot.alliances.reject(alliance_id)
         await interaction.response.send_message(
             f"{'🗑️ Rejected' if ok else '❌ Not found'}: alliance #{alliance_id}", ephemeral=True)
+
+    @app_commands.command(name="setgamestate", description="(Admin) Record a game-state fact (fix a miss).")
+    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee",
+                           houseguest="Houseguest name", week="Week number (default: current)")
+    async def setgamestate(self, interaction: discord.Interaction, role: str,
+                           houseguest: str, week: int | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        role = role.strip().lower()
+        valid = ("hoh", "nominee", "veto_winner", "veto_used_on", "evicted", "replacement_nominee")
+        if role not in valid:
+            await interaction.response.send_message(
+                f"Role must be one of: {', '.join(valid)}", ephemeral=True)
+            return
+        name = self.bot.roster.resolve(houseguest)
+        if not name:
+            await interaction.response.send_message(
+                f"'{houseguest}' isn't on the roster.", ephemeral=True)
+            return
+        await self.bot.game_state.set_fact(role, name, week)
+        wk = week or self.bot.game_state.current_week()
+        await interaction.response.send_message(
+            f"✅ Set: week {wk} {role} = {name}", ephemeral=True)
+
+    @app_commands.command(name="removegamestate", description="(Admin) Delete a wrong game-state fact.")
+    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee",
+                           houseguest="Houseguest name", week="Week number (default: current)")
+    async def removegamestate(self, interaction: discord.Interaction, role: str,
+                              houseguest: str, week: int | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        name = self.bot.roster.resolve(houseguest) or houseguest.strip()
+        ok = await self.bot.game_state.remove_fact(role.strip().lower(), name, week)
+        wk = week or self.bot.game_state.current_week()
+        await interaction.response.send_message(
+            f"{'🗑️ Removed' if ok else '❌ Not found'}: week {wk} {role} / {name}", ephemeral=True)
 
     @app_commands.command(name="setchannel", description="(Admin) Set the channel for posts.")
     async def setchannel(self, interaction: discord.Interaction, channel: discord.TextChannel):
