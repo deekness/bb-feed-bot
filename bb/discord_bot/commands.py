@@ -1,7 +1,7 @@
 """Slash commands.
 
-Public: /wtf, /summary, /alliances, /relationship, /gamestate, /ask, /votes,
-        /houseguest, /week, /roster
+Public: /help, /wtf, /summary, /alliances, /relationship, /gamestate, /ask,
+        /votes, /houseguest, /week, /roster (+ /zing in zings.py)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
         /rejectalliance, /setgamestate, /removegamestate, /setchannel, /status
 Owner:  /sync
@@ -20,11 +20,58 @@ from discord.ext import commands
 log = logging.getLogger("bb.commands")
 
 
+def _chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
+    """Pack lines into embed-field-sized chunks (Discord caps fields at 1024)."""
+    chunks: list[str] = []
+    cur = ""
+    for ln in lines:
+        if cur and len(cur) + len(ln) + 1 > limit:
+            chunks.append(cur)
+            cur = ln
+        else:
+            cur = f"{cur}\n{ln}" if cur else ln
+    if cur:
+        chunks.append(cur)
+    return chunks
+
+
 class BBCommands(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
 
     # --- public -------------------------------------------------------------
+    @app_commands.command(name="help", description="List everything the bot can do.")
+    async def help(self, interaction: discord.Interaction):
+        """Auto-generated from the command tree, so new cogs/commands show up
+        without touching this. Admin/Owner sections render only for admins,
+        keyed off the '(Admin)'/'(Owner)' description prefix convention."""
+        public: list[str] = []
+        admin: list[str] = []
+        owner: list[str] = []
+        for cmd in sorted(self.bot.tree.get_commands(), key=lambda c: c.name):
+            desc = cmd.description or ""
+            if desc.startswith("(Admin)"):
+                admin.append(f"**/{cmd.name}** — {desc[7:].strip()}")
+            elif desc.startswith("(Owner)"):
+                owner.append(f"**/{cmd.name}** — {desc[7:].strip()}")
+            else:
+                public.append(f"**/{cmd.name}** — {desc}")
+
+        embed = discord.Embed(title="📖 Bot Commands", color=0x5865F2)
+        for i, chunk in enumerate(_chunk_lines(public)):
+            embed.add_field(name="Everyone" if i == 0 else "Everyone (cont.)",
+                            value=chunk, inline=False)
+        if self.bot.is_admin(interaction):
+            for i, chunk in enumerate(_chunk_lines(admin)):
+                embed.add_field(name="Admin" if i == 0 else "Admin (cont.)",
+                                value=chunk, inline=False)
+            for i, chunk in enumerate(_chunk_lines(owner)):
+                embed.add_field(name="Owner" if i == 0 else "Owner (cont.)",
+                                value=chunk, inline=False)
+        embed.set_footer(text="Hourly summaries, daily recaps (6am), weekly recaps, "
+                              "and 🚨 Breaking posts arrive automatically.")
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
     @app_commands.command(name="wtf", description="What's happening in the house right now?")
     async def wtf(self, interaction: discord.Interaction):
         await interaction.response.defer()
