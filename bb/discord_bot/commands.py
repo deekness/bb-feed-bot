@@ -1,7 +1,9 @@
 """Slash commands.
 
-Public: /wtf, /summary, /alliances, /relationship, /gamestate
-Admin:  /confirmalliance, /rejectalliance, /setchannel, /status
+Public: /wtf, /summary, /alliances, /relationship, /gamestate, /ask, /votes,
+        /houseguest, /week, /roster
+Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
+        /rejectalliance, /setgamestate, /removegamestate, /setchannel, /status
 Owner:  /sync
 
 This is intentionally small. Add new feature cogs (e.g. predictions) as
@@ -133,8 +135,8 @@ class BBCommands(commands.Cog):
             for target, voters in ranked:
                 embed.add_field(name=f"To evict {target} — {len(voters)}",
                                 value=", ".join(voters), inline=False)
-            embed.set_footer(text="Latest stated plan per voter. Houseguests flip — "
-                                  "treat this as a snapshot, not a lock.")
+            embed.set_footer(text="Latest stated plan per voter since the last eviction. "
+                                  "Houseguests flip — snapshot, not a lock.")
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="houseguest", description="Everything tracked about one houseguest.")
@@ -196,7 +198,96 @@ class BBCommands(commands.Cog):
         embed = await self.bot.summarizer.weekly_recap(dailies, number, context)
         await interaction.followup.send(embed=embed)
 
+    @app_commands.command(name="roster", description="Show the current season roster and nicknames.")
+    async def roster(self, interaction: discord.Interaction):
+        r = self.bot.roster
+        embed = discord.Embed(title=f"📋 {self.bot.season.name} Roster",
+                              color=0x2ECC71, timestamp=discord.utils.utcnow())
+        if r.is_empty:
+            embed.description = ("Roster is empty — extraction is paused until it's filled. "
+                                 "Admins can /addhouseguest as the cast is revealed.")
+        else:
+            embed.description = ", ".join(sorted(r.names))
+            nicks = r.nicknames
+            if nicks:
+                nick_text = ", ".join(f"{k} → {v}" for k, v in sorted(nicks.items()))
+                embed.add_field(name="Nicknames", value=nick_text[:1024], inline=False)
+            embed.set_footer(text=f"{len(r.names)} houseguests")
+        await interaction.response.send_message(embed=embed)
+
     # --- admin --------------------------------------------------------------
+    @app_commands.command(name="addhouseguest", description="(Admin) Add a houseguest to the roster — no redeploy needed.")
+    @app_commands.describe(name="Canonical first name as the feeds use it, e.g. 'Rachel'")
+    async def addhouseguest(self, interaction: discord.Interaction, name: str):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        name = name.strip()
+        if not 1 <= len(name) <= 40:
+            await interaction.response.send_message("Name must be 1–40 characters.", ephemeral=True)
+            return
+        if self.bot.roster.contains(name):
+            await interaction.response.send_message(
+                f"'{self.bot.roster.resolve(name)}' is already on the roster.", ephemeral=True)
+            return
+        self.bot.roster.add(name)
+        extra = await self.bot.db.kv_get("roster_extra") or []
+        if name not in extra:
+            extra.append(name)
+        await self.bot.db.kv_set("roster_extra", extra)
+        # Un-remove if it was previously removed.
+        removed = [n for n in (await self.bot.db.kv_get("roster_removed") or [])
+                   if n.lower() != name.lower()]
+        await self.bot.db.kv_set("roster_removed", removed)
+        await interaction.response.send_message(
+            f"✅ Added **{name}** — roster is now {len(self.bot.roster.names)} houseguests. "
+            "Extraction and Bluesky relevance pick this up immediately.", ephemeral=True)
+
+    @app_commands.command(name="removehouseguest", description="(Admin) Remove a mistaken roster entry (evicted HGs should STAY).")
+    @app_commands.describe(name="Name to remove — typo fixes only")
+    async def removehouseguest(self, interaction: discord.Interaction, name: str):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        canon = self.bot.roster.resolve(name)
+        if not canon:
+            await interaction.response.send_message(f"'{name}' isn't on the roster.", ephemeral=True)
+            return
+        self.bot.roster.remove(canon)
+        extra = [n for n in (await self.bot.db.kv_get("roster_extra") or [])
+                 if n.lower() != canon.lower()]
+        await self.bot.db.kv_set("roster_extra", extra)
+        removed = await self.bot.db.kv_get("roster_removed") or []
+        if canon not in removed:
+            removed.append(canon)
+        await self.bot.db.kv_set("roster_removed", removed)
+        await interaction.response.send_message(
+            f"🗑️ Removed **{canon}** — roster is now {len(self.bot.roster.names)} houseguests.",
+            ephemeral=True)
+
+    @app_commands.command(name="addnickname", description="(Admin) Map a nickname/typo the feeds use to a roster name.")
+    @app_commands.describe(nickname="What the feeds call them", target="Canonical roster name")
+    async def addnickname(self, interaction: discord.Interaction, nickname: str, target: str):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        canon = self.bot.roster.resolve(target)
+        if not canon:
+            await interaction.response.send_message(
+                f"'{target}' isn't on the roster — add them first with /addhouseguest.",
+                ephemeral=True)
+            return
+        nickname = nickname.strip()
+        if not 1 <= len(nickname) <= 40:
+            await interaction.response.send_message("Nickname must be 1–40 characters.", ephemeral=True)
+            return
+        self.bot.roster.add_nickname(nickname, canon)
+        nicks = await self.bot.db.kv_get("nickname_extra") or {}
+        nicks[nickname.lower()] = canon
+        await self.bot.db.kv_set("nickname_extra", nicks)
+        await interaction.response.send_message(
+            f"✅ '{nickname}' now resolves to **{canon}**.", ephemeral=True)
+
     @app_commands.command(name="confirmalliance", description="(Admin) Lock an alliance as real.")
     async def confirmalliance(self, interaction: discord.Interaction, alliance_id: int):
         if not self.bot.is_admin(interaction):
@@ -274,6 +365,13 @@ class BBCommands(commands.Cog):
         embed.add_field(name="LLM", value="✅ on" if self.bot.llm.available else "❌ off (pattern mode)", inline=True)
         embed.add_field(name="Channel", value=channel.mention if channel else "not set", inline=True)
         embed.add_field(name="Updates (last hour)", value=str(len(recent)), inline=True)
+        import datetime as _dt
+        now = _dt.datetime.now(self.bot.tz)
+        ep = self.bot.episode_now()
+        clock = f"{self.bot.settings.timezone}\n{now.strftime('%a %I:%M %p')}"
+        if ep:
+            clock += " · 📺 episode window" + (" (LIVE)" if ep.get("live") else "")
+        embed.add_field(name="Clock", value=clock, inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # --- owner --------------------------------------------------------------

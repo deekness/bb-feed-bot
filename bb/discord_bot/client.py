@@ -86,8 +86,6 @@ class BBBot(commands.Bot):
         self.game_state = GameStateTracker(self.db, season.start_date)
         self.votes = VoteTracker(self.db)
 
-        self._last_daily: dt.date | None = None
-        self._last_weekly: int = 0
         self._recent_for_context: list = []  # last few processed updates
         self._quiet_streak: int = 0
         self._ant_bag: list[str] = []
@@ -96,6 +94,7 @@ class BBBot(commands.Bot):
     # --- lifecycle ----------------------------------------------------------
     async def setup_hook(self) -> None:
         await self.db.connect()
+        await self._merge_runtime_roster()
         from .commands import BBCommands
         from .zings import ZingCog
         await self.add_cog(BBCommands(self))
@@ -124,6 +123,22 @@ class BBBot(commands.Bot):
             return None
         ch = self.get_channel(int(cid))
         return ch if isinstance(ch, discord.TextChannel) else None
+
+    async def _merge_runtime_roster(self) -> None:
+        """Re-apply roster changes made at runtime (/addhouseguest etc., stored
+        in bot_kv) on top of season.yaml so they survive restarts. Order
+        matters: adds, then nicknames, then removals (removals win)."""
+        try:
+            for n in (await self.db.kv_get("roster_extra") or []):
+                self.roster.add(n)
+            for nick, target in (await self.db.kv_get("nickname_extra") or {}).items():
+                self.roster.add_nickname(nick, target)
+            for n in (await self.db.kv_get("roster_removed") or []):
+                self.roster.remove(n)
+            if self.roster.names:
+                log.info("roster ready: %d houseguests", len(self.roster.names))
+        except Exception as e:
+            log.error("runtime roster merge failed: %s", e)
 
     def is_admin(self, interaction: discord.Interaction) -> bool:
         if self.settings.owner_id and interaction.user.id == self.settings.owner_id:
@@ -246,56 +261,99 @@ class BBBot(commands.Bot):
 
     @tasks.loop(minutes=60)
     async def hourly_loop(self) -> None:
+        """Summarize every hour boundary since the last one we processed
+        (persisted in bot_kv). Hours missed while the bot was down are
+        summarized and STORED so the daily map-reduce has no holes; only the
+        current hour is posted to the channel. Catch-up is capped at 24
+        windows so a long outage can't flood the LLM."""
         try:
             now = dt.datetime.now(self.tz)
             hour_end = now.replace(minute=0, second=0, microsecond=0)
-            hour_start = hour_end - dt.timedelta(hours=1)
-            start_utc = hour_start.astimezone(dt.timezone.utc)
-            end_utc = hour_end.astimezone(dt.timezone.utc)
-            updates = await self.db.updates_between(start_utc, end_utc)
-            if not updates:
-                # Quiet hour: the ants take over — but only for 3 in a row,
-                # then silence until the feeds wake back up.
-                self._quiet_streak += 1
-                if self._in_season() and self._quiet_streak <= 3:
-                    channel = await self.update_channel()
-                    if channel:
-                        line = ANT_SIGNOFF if self._quiet_streak == 3 else self._next_ant_line()
-                        await channel.send(embed=discord.Embed(
-                            title=f"🐜 House Summary — {hour_end.strftime('%I %p').lstrip('0')}",
-                            description=line, color=0x95A5A6,
-                            timestamp=dt.datetime.now(self.tz)))
-                return
-            self._quiet_streak = 0
 
-            context = await self.house_context()
-            label = hour_end.strftime("%I %p").lstrip("0")
-            embeds = await self.summarizer.hourly(updates, label, context)
+            windows: list[tuple[dt.datetime, dt.datetime]] = []
+            last_iso = await self.db.kv_get("last_hourly_end")
+            last_end: dt.datetime | None = None
+            if isinstance(last_iso, str):
+                try:
+                    last_end = dt.datetime.fromisoformat(last_iso).astimezone(self.tz)
+                except ValueError:
+                    last_end = None
+            if last_end is None or last_end >= hour_end:
+                windows.append((hour_end - dt.timedelta(hours=1), hour_end))
+            else:
+                cur = max(last_end, hour_end - dt.timedelta(hours=24))
+                while cur < hour_end:
+                    windows.append((cur, cur + dt.timedelta(hours=1)))
+                    cur += dt.timedelta(hours=1)
 
-            # Map step: store the digest so the daily recap covers the whole
-            # day instead of a lossy top-5 of raw updates.
-            if embeds and embeds[0].description:
-                await self.db.add_summary("hourly", start_utc, end_utc,
-                                          embeds[0].description, len(updates))
-
-            if not self._in_season():
-                return  # off-season: summarize/store silently, post nothing
-            channel = await self.update_channel()
-            if not channel:
-                return
-            for embed in embeds:
-                await channel.send(embed=embed)
+            for w_start, w_end in windows:
+                await self._summarize_hour(w_start, w_end, post=(w_end == hour_end))
+            await self.db.kv_set("last_hourly_end", hour_end.isoformat())
         except Exception as e:
             log.error("hourly loop error: %s", e)
 
+    async def _summarize_hour(self, hour_start: dt.datetime,
+                              hour_end: dt.datetime, post: bool) -> None:
+        start_utc = hour_start.astimezone(dt.timezone.utc)
+        end_utc = hour_end.astimezone(dt.timezone.utc)
+
+        # Idempotence: a retried catch-up batch (or a drift-induced re-fire)
+        # must not store or post the same window twice.
+        if await self.db.fetchval(
+                "SELECT 1 FROM summaries WHERE kind = 'hourly' "
+                "AND period_start = $1 AND period_end = $2 LIMIT 1",
+                start_utc, end_utc):
+            return
+
+        updates = await self.db.updates_between(start_utc, end_utc)
+        if not updates:
+            if not post:
+                return  # missed window with nothing in it: nothing to store
+            # Quiet hour: the ants take over — but only for 3 in a row,
+            # then silence until the feeds wake back up.
+            self._quiet_streak += 1
+            if self._in_season() and self._quiet_streak <= 3:
+                channel = await self.update_channel()
+                if channel:
+                    line = ANT_SIGNOFF if self._quiet_streak == 3 else self._next_ant_line()
+                    await channel.send(embed=discord.Embed(
+                        title=f"🐜 House Summary — {hour_end.strftime('%I %p').lstrip('0')}",
+                        description=line, color=0x95A5A6,
+                        timestamp=dt.datetime.now(self.tz)))
+            return
+        self._quiet_streak = 0
+
+        context = await self.house_context()
+        label = hour_end.strftime("%I %p").lstrip("0")
+        embeds = await self.summarizer.hourly(updates, label, context)
+
+        # Map step: store the digest so the daily recap covers the whole
+        # day instead of a lossy top-5 of raw updates.
+        if embeds and embeds[0].description:
+            await self.db.add_summary("hourly", start_utc, end_utc,
+                                      embeds[0].description, len(updates))
+
+        if not post or not self._in_season():
+            return  # catch-up / off-season: store silently, post nothing
+        channel = await self.update_channel()
+        if not channel:
+            return
+        for embed in embeds:
+            await channel.send(embed=embed)
+
     @tasks.loop(minutes=15)
     async def daily_loop(self) -> None:
-        """Clock-checked so it fires at 06:00 in the configured timezone."""
+        """Fires on the first tick at/after 06:00 local. Markers live in
+        bot_kv, so a restart can neither double-post a recap nor permanently
+        skip a day the bot happened to be down at 6am."""
         try:
             now = dt.datetime.now(self.tz)
-            if now.hour != 6 or self._last_daily == now.date():
+            if now.hour < 6:
                 return
-            self._last_daily = now.date()
+            today = now.date().isoformat()
+            if await self.db.kv_get("last_daily_date") == today:
+                return
+            await self.db.kv_set("last_daily_date", today)
 
             if not self._in_season():
                 return  # off-season: no daily recap until the season starts
@@ -308,7 +366,11 @@ class BBBot(commands.Bot):
             if not channel:
                 return
 
-            end_utc = now.astimezone(dt.timezone.utc)
+            # Window anchored to the 06:00 boundary, not the fire time, so a
+            # late fire (post-outage) still covers exactly yesterday-6am ->
+            # today-6am.
+            end_local = now.replace(hour=6, minute=0, second=0, microsecond=0)
+            end_utc = end_local.astimezone(dt.timezone.utc)
             start_utc = end_utc - dt.timedelta(hours=24)
             hourlies = await self.db.summaries_between("hourly", start_utc, end_utc)
             fallback = await self.db.recent_updates(24)
@@ -321,18 +383,24 @@ class BBBot(commands.Bot):
                                           embed.description,
                                           sum(h["update_count"] for h in hourlies) or len(fallback))
 
-            # Weekly recap: on the first morning of a new game week, reduce the
-            # just-completed week's daily recaps into a week story.
-            days_in = (now.date() - self.season.start_date).days
-            if days_in >= 7 and days_in % 7 == 0:
-                completed = days_in // 7
-                if completed > self._last_weekly:
-                    self._last_weekly = completed
-                    wk_end = end_utc
-                    wk_start = wk_end - dt.timedelta(days=7)
-                    dailies = await self.db.summaries_between("daily", wk_start, wk_end)
-                    wembed = await self.summarizer.weekly_recap(dailies, completed, context)
-                    await channel.send(embed=wembed)
+            # Weekly recap: post the most recently completed game week if it
+            # hasn't been posted yet. No day-modulo gate — if the bot is down
+            # on the boundary morning, the recap self-heals the next morning
+            # instead of being dropped. Window is computed from the week
+            # number (same math as /week), not "last 7 days from now".
+            completed = (now.date() - self.season.start_date).days // 7
+            last_weekly = int(await self.db.kv_get("last_weekly") or 0)
+            if completed >= 1 and completed > last_weekly:
+                await self.db.kv_set("last_weekly", completed)
+                wk_start_date = self.season.start_date + dt.timedelta(days=7 * (completed - 1))
+                wk_end_date = wk_start_date + dt.timedelta(days=7)
+                wk_start = dt.datetime.combine(
+                    wk_start_date, dt.time.min, self.tz).astimezone(dt.timezone.utc)
+                wk_end = dt.datetime.combine(
+                    wk_end_date, dt.time.max, self.tz).astimezone(dt.timezone.utc)
+                dailies = await self.db.summaries_between("daily", wk_start, wk_end)
+                wembed = await self.summarizer.weekly_recap(dailies, completed, context)
+                await channel.send(embed=wembed)
         except Exception as e:
             log.error("daily loop error: %s", e)
 

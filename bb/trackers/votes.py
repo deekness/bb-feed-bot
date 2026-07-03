@@ -40,13 +40,33 @@ class VoteTracker:
                 log.error("vote ingest failed: %s", e)
 
     async def current(self, week: int) -> dict[str, list[str]]:
-        """target -> [voters], most recent plans only."""
+        """target -> [voters], latest plan per voter.
+
+        BB weeks straddle the calendar-week flip: plans stated Mon-Wed live in
+        week N while eviction-day plans land in week N+1, so the current and
+        previous week are merged. Two filters keep the board honest:
+          * plans older than the most recent recorded eviction are dropped —
+            the vote board resets when someone walks out the door, and
+          * anyone already evicted is excluded as voter or target.
+        """
+        last_evict = await self.db.fetchval(
+            "SELECT max(set_at) FROM game_state WHERE role = 'evicted'")
         rows = await self.db.fetch(
-            "SELECT voter, target FROM vote_plans WHERE week = $1 ORDER BY updated_at DESC",
-            week,
+            """
+            SELECT DISTINCT ON (voter) voter, target
+            FROM vote_plans
+            WHERE week BETWEEN $1 AND $2
+              AND ($3::timestamptz IS NULL OR updated_at > $3)
+            ORDER BY voter, updated_at DESC
+            """,
+            max(1, week - 1), week, last_evict,
         )
+        evicted = {r["houseguest"] for r in await self.db.fetch(
+            "SELECT houseguest FROM game_state WHERE role = 'evicted'")}
         counts: dict[str, list[str]] = {}
         for r in rows:
+            if r["voter"] in evicted or r["target"] in evicted:
+                continue
             counts.setdefault(r["target"], []).append(r["voter"])
         return counts
 

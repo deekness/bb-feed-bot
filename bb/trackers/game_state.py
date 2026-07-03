@@ -40,8 +40,7 @@ class GameStateTracker:
                     INSERT INTO game_state (week, role, houseguest, confidence, source_hash)
                     VALUES ($1, $2, $3, $4, $5)
                     ON CONFLICT (week, role, houseguest) DO UPDATE
-                    SET confidence = GREATEST(game_state.confidence, EXCLUDED.confidence),
-                        set_at = now()
+                    SET confidence = GREATEST(game_state.confidence, EXCLUDED.confidence)
                     """,
                     week, e.role, e.houseguest, e.confidence,
                     getattr(e, "source_hash", ""),

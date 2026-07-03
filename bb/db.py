@@ -249,7 +249,16 @@ class Database:
 
     # --- key/value (channel id, last-run markers, etc.) ---------------------
     async def kv_get(self, key: str):
+        """asyncpg returns JSONB as raw JSON text — decode it so callers get
+        real ints/strings/lists/dicts back (a stored ISO string would otherwise
+        come back wrapped in literal quotes)."""
+        import json
         val = await self.fetchval("SELECT value FROM bot_kv WHERE key = $1", key)
+        if isinstance(val, str):
+            try:
+                return json.loads(val)
+            except (ValueError, TypeError):
+                return val
         return val
 
     async def kv_set(self, key: str, value) -> None:
