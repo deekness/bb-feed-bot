@@ -57,9 +57,19 @@ def importance(update: Update) -> int:
     return min(score, 5)
 
 
-def is_urgent(update: Update) -> bool:
+def urgent_keyword(update: Update) -> str | None:
+    """The first urgent keyword present in the update, or None. The keyword
+    itself is used by the caller as a cooldown key so one real-world event
+    reported by multiple sources fires one Breaking post, not several."""
     text = update.text.lower()
-    return any(k in text for k in URGENT_KEYWORDS)
+    for k in URGENT_KEYWORDS:
+        if k in text:
+            return k
+    return None
+
+
+def is_urgent(update: Update) -> bool:
+    return urgent_keyword(update) is not None
 
 
 class Summarizer:

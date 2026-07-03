@@ -1,9 +1,10 @@
 """Slash commands.
 
-Public: /help, /wtf, /summary, /alliances, /relationship, /gamestate, /ask,
-        /votes, /houseguest, /week, /roster (+ /zing in zings.py)
+Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
+        /gamestate, /ask, /votes, /houseguest, /week, /roster (+ /zing in zings.py)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /setgamestate, /removegamestate, /setchannel, /status
+        /rejectalliance, /setgamestate, /removegamestate, /setchannel, /status,
+        /testdm
 Owner:  /sync
 
 This is intentionally small. Add new feature cogs (e.g. predictions) as
@@ -111,6 +112,40 @@ class BBCommands(commands.Cog):
                     self._fmt_alliance(a) for a in weak[:6]))
             embed.set_footer(text="Confidence rises with corroboration and decays without it. "
                                   "Admins can /confirmalliance or /rejectalliance.")
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="alliance", description="One alliance's details and the evidence behind it.")
+    @app_commands.describe(alliance_id="The #id shown in /alliances")
+    async def alliance(self, interaction: discord.Interaction, alliance_id: int):
+        await interaction.response.defer()
+        a = await self.bot.alliances.detail(alliance_id)
+        if not a:
+            await interaction.followup.send(f"No alliance #{alliance_id}.", ephemeral=True)
+            return
+        lock = "🔒 " if a["locked"] else ""
+        embed = discord.Embed(
+            title=f"🤝 {lock}#{a['id']} {a['name'] or '/'.join(a['members'])}",
+            color=0x3498DB, timestamp=discord.utils.utcnow())
+        embed.add_field(name="Members", value=", ".join(a["members"]), inline=False)
+        embed.add_field(name="Status", value=a["status"], inline=True)
+        embed.add_field(name="Confidence", value=f"{a['confidence']:.0%}", inline=True)
+        embed.add_field(name="First seen", value=a["first_seen"].astimezone(self.bot.tz).strftime("%b %d %I:%M %p"), inline=True)
+        evidence = await self.bot.alliances.evidence(alliance_id)
+        if evidence:
+            lines = []
+            for e in evidence:
+                ts = e["created_at"].astimezone(self.bot.tz).strftime("%b %d %I:%M %p")
+                quote = (e["quote"] or "").strip()
+                if len(quote) > 150:
+                    quote = quote[:147] + "..."
+                line = f"[{ts}] “{quote}”" if quote else f"[{ts}] (no quote)"
+                if e["link"]:
+                    line += f" — [source]({e['link']})"
+                lines.append(line)
+            embed.add_field(name=f"Evidence (latest {len(evidence)})",
+                            value="\n".join(lines)[:1024], inline=False)
+        if not a["locked"]:
+            embed.set_footer(text=f"/confirmalliance {a['id']} to lock it in · /rejectalliance {a['id']} to dismiss")
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="relationship", description="Show a houseguest's relationships.")
@@ -390,6 +425,32 @@ class BBCommands(commands.Cog):
         wk = week or self.bot.game_state.current_week()
         await interaction.response.send_message(
             f"{'🗑️ Removed' if ok else '❌ Not found'}: week {wk} {role} / {name}", ephemeral=True)
+
+    @app_commands.command(name="testdm", description="(Admin) Send a test DM to verify admin nudges can reach the owner.")
+    async def testdm(self, interaction: discord.Interaction):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        if not self.bot.settings.owner_id:
+            await interaction.followup.send(
+                "❌ `OWNER_ID` env var is not set on Railway — nudges have nowhere "
+                "to go. Set it to your Discord user ID and redeploy.", ephemeral=True)
+            return
+        ok = await self.bot._send_admin_dm(discord.Embed(
+            title="🔔 Test nudge", color=0xF39C12,
+            description="Admin DMs are working. You'll get a daily to-do here "
+                        "whenever something needs human review (roster gaps, "
+                        "missing HOH/noms, alliances awaiting confirm/reject) "
+                        "and an alert if the feeds stall mid-season."))
+        if ok:
+            await interaction.followup.send("✅ Sent — check your DMs.", ephemeral=True)
+        else:
+            await interaction.followup.send(
+                f"❌ Couldn't DM <@{self.bot.settings.owner_id}>. Usual cause: "
+                "Discord privacy settings block DMs from server members — enable "
+                "them for this server, or check that OWNER_ID is your user ID.",
+                ephemeral=True)
 
     @app_commands.command(name="setchannel", description="(Admin) Set the channel for posts.")
     async def setchannel(self, interaction: discord.Interaction, channel: discord.TextChannel):

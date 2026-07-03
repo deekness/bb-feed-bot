@@ -5,8 +5,22 @@ only after enough corroboration; confidence decays without fresh mentions;
 and human confirm/reject (the `locked` flag) is never overwritten by the
 automatic pipeline. Members are always roster-validated upstream.
 
-Matching rule: a proposal merges into an existing alliance if they share
-MERGE_OVERLAP+ members, otherwise a new (forming) alliance is created.
+Matching rules (audit fix — the old "any 2 shared members" rule snowballed
+adjacent alliances into one blob and made final-2 deals impossible to track):
+  * exact member-set match always merges (corroboration);
+  * 2-person proposals (F2 deals / duos) ONLY merge on exact match — they are
+    first-class entities in BB, never absorbed into a superset;
+  * otherwise merge requires MERGE_OVERLAP+ shared members AND Jaccard
+    similarity >= JACCARD_MIN, and two differently-NAMED alliances are always
+    distinct (houseguests naming a group makes it its own entity);
+  * an unlocked alliance that decayed to 'dissolved' is resurrected to
+    'forming' by fresh evidence — but a human-rejected (locked) one stays dead
+    and silently absorbs repeat proposals so it can't respawn.
+
+Corroboration cooldown: the same conversation gets reported by RSS and several
+Bluesky accounts within minutes, so confidence only bumps when the last
+evidence is CORROBORATION_COOLDOWN_H+ hours old. Evidence rows and last_seen
+are always recorded regardless.
 """
 from __future__ import annotations
 
@@ -19,7 +33,9 @@ log = logging.getLogger("bb.trackers.alliances")
 
 class AllianceTracker:
     MERGE_OVERLAP = 2        # shared members required to treat as the same alliance
-    CORROBORATION = 0.25     # confidence gained per fresh mention
+    JACCARD_MIN = 0.55       # member-set similarity required to merge non-exact matches
+    CORROBORATION = 0.25     # confidence gained per fresh (non-duplicate) mention
+    CORROBORATION_COOLDOWN_H = 3  # min hours between confidence bumps
     PROMOTE_AT = 0.6         # forming -> active threshold
     DECAY_PER_DAY = 0.08     # confidence lost per day without a mention
     DISSOLVE_BELOW = 0.15    # auto-dissolve threshold
@@ -35,13 +51,17 @@ class AllianceTracker:
                 log.error("alliance ingest failed: %s", e)
 
     async def _ingest_one(self, proposal, source_hash: str) -> None:
-        match = await self._best_match(proposal.members)
+        match = await self._best_match(proposal.members, proposal.name)
 
         if match is None:
             await self._create(proposal)
             return
 
         alliance_id = match["id"]
+        # Cooldown check BEFORE inserting the new evidence row.
+        last_ev = await self.db.fetchval(
+            "SELECT max(created_at) FROM alliance_evidence WHERE alliance_id = $1",
+            alliance_id)
         # Always record evidence + recency.
         await self.db.execute(
             "INSERT INTO alliance_evidence (alliance_id, quote, confidence, source_hash) "
@@ -54,8 +74,15 @@ class AllianceTracker:
             # Human-decided (confirmed or rejected): do not auto-modify status/confidence.
             return
 
-        new_conf = min(1.0, float(match["confidence"]) + self.CORROBORATION)
+        import datetime as _dt
+        fresh = last_ev is None or (
+            _dt.datetime.now(_dt.timezone.utc) - last_ev
+        ) >= _dt.timedelta(hours=self.CORROBORATION_COOLDOWN_H)
+        new_conf = (min(1.0, float(match["confidence"]) + self.CORROBORATION)
+                    if fresh else float(match["confidence"]))
         status = match["status"]
+        if status == "dissolved":
+            status = "forming"   # resurrection: fresh evidence revives an auto-dissolved group
         if status == "forming" and new_conf >= self.PROMOTE_AT:
             status = "active"
         if proposal.status in ("fracturing", "dissolved"):
@@ -74,7 +101,7 @@ class AllianceTracker:
                 alliance_id, hg,
             )
 
-    async def _best_match(self, members: list[str]):
+    async def _best_match(self, members: list[str], name: str | None = None):
         rows = await self.db.fetch(
             """
             SELECT a.id, a.name, a.status, a.confidence, a.locked,
@@ -84,12 +111,25 @@ class AllianceTracker:
             GROUP BY a.id
             """
         )
-        member_set = set(members)
-        best, best_overlap = None, 0
+        return self._pick_match(members, name, rows)
+
+    def _pick_match(self, members: list[str], name: str | None, rows):
+        """Pure matching logic (unit-testable). See module docstring for rules."""
+        mset = set(members)
+        best, best_j = None, 0.0
         for r in rows:
-            overlap = len(member_set & set(r["members"]))
-            if overlap >= self.MERGE_OVERLAP and overlap > best_overlap:
-                best, best_overlap = r, overlap
+            rset = set(r["members"])
+            if mset == rset:
+                return r  # exact corroboration always wins
+            if len(mset) == 2 or len(rset) == 2:
+                continue  # duos are protected both ways: they never merge into
+                          # supersets and never absorb them
+            if name and r["name"] and name.strip().lower() != str(r["name"]).strip().lower():
+                continue  # differently-named alliances are distinct entities
+            overlap = len(mset & rset)
+            j = overlap / len(mset | rset)
+            if overlap >= self.MERGE_OVERLAP and j >= self.JACCARD_MIN and j > best_j:
+                best, best_j = r, j
         return best
 
     async def _create(self, proposal) -> None:
@@ -157,6 +197,34 @@ class AllianceTracker:
             ORDER BY a.confidence DESC
             """,
             name,
+        )
+        return [dict(r) for r in rows]
+
+    async def detail(self, alliance_id: int) -> dict | None:
+        row = await self.db.fetchrow(
+            """
+            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.first_seen,
+                   a.last_seen, array_agg(m.houseguest ORDER BY m.houseguest) AS members
+            FROM alliances a
+            JOIN alliance_members m ON m.alliance_id = a.id AND m.active
+            WHERE a.id = $1
+            GROUP BY a.id
+            """,
+            alliance_id,
+        )
+        return dict(row) if row else None
+
+    async def evidence(self, alliance_id: int, limit: int = 8) -> list[dict]:
+        rows = await self.db.fetch(
+            """
+            SELECT e.quote, e.confidence, e.created_at, u.link
+            FROM alliance_evidence e
+            LEFT JOIN updates u ON u.content_hash = e.source_hash
+            WHERE e.alliance_id = $1
+            ORDER BY e.created_at DESC
+            LIMIT $2
+            """,
+            alliance_id, limit,
         )
         return [dict(r) for r in rows]
 

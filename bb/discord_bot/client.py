@@ -16,13 +16,15 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import re
+import time
 from zoneinfo import ZoneInfo
 
 import discord
 from discord.ext import commands, tasks
 
 from ..analysis.extract import Extractor
-from ..analysis.summarize import Summarizer, is_urgent
+from ..analysis.summarize import Summarizer, urgent_keyword
 from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
@@ -36,6 +38,12 @@ from ..trackers.relationships import RelationshipTracker
 from ..trackers.votes import VoteTracker
 
 log = logging.getLogger("bb.bot")
+
+
+def _names_in(text: str, names: list[str]) -> list[str]:
+    """Roster names appearing in text (word-boundary, case-insensitive), sorted."""
+    return sorted(n for n in names
+                  if re.search(rf"\b{re.escape(n)}\b", text, re.IGNORECASE))
 
 _ROLE_LABELS = {"hoh": "HOH", "nominee": "Nominees", "veto_winner": "Veto winner",
                 "veto_used_on": "Veto used on", "evicted": "Evicted",
@@ -61,6 +69,8 @@ ANT_SIGNOFF = ("Still quiet. Even the ants have gone to bed — I'll pipe back u
 
 
 class BBBot(commands.Bot):
+    BREAKING_COOLDOWN_S = 20 * 60  # per (keyword+names) 🚨 suppression window
+
     def __init__(self, settings: Settings, season: Season):
         intents = discord.Intents.default()
         intents.members = True  # needed to pick a random member for /zing
@@ -87,6 +97,7 @@ class BBBot(commands.Bot):
         self.votes = VoteTracker(self.db)
 
         self._recent_for_context: list = []  # last few processed updates
+        self._breaking_last: dict[str, float] = {}  # (keyword|names) -> monotonic ts
         self._quiet_streak: int = 0
         self._ant_bag: list[str] = []
         self._live_mode: bool = False
@@ -139,6 +150,134 @@ class BBBot(commands.Bot):
                 log.info("roster ready: %d houseguests", len(self.roster.names))
         except Exception as e:
             log.error("runtime roster merge failed: %s", e)
+
+    # --- admin DM nudges ------------------------------------------------------
+    async def _send_admin_dm(self, embed: discord.Embed) -> bool:
+        """DM the configured owner. Returns False (and logs why) if OWNER_ID is
+        unset, the user can't be fetched, or their DMs are closed."""
+        if not self.settings.owner_id:
+            log.warning("admin nudge skipped: OWNER_ID env var is not set")
+            return False
+        try:
+            user = self.get_user(self.settings.owner_id) or \
+                await self.fetch_user(self.settings.owner_id)
+            await user.send(embed=embed)
+            return True
+        except discord.Forbidden:
+            log.warning("admin nudge failed: owner's DMs are closed to this bot "
+                        "(Privacy Settings -> allow DMs from server members)")
+        except Exception as e:
+            log.error("admin nudge failed: %s", e)
+        return False
+
+    async def _admin_nudges(self, now: dt.datetime) -> None:
+        """Once a day, DM the owner a to-do list of human-verification tasks
+        the pipeline can't do itself. Each item re-nudges only after its own
+        interval (tracked in bot_kv), so nothing spams and nothing is
+        forgotten. Items:
+          * roster empty with the premiere <= 7 days away (or started)
+          * no HOH / nominees recorded this game week when they should exist
+          * unlocked alliances at established confidence awaiting
+            /confirmalliance / /rejectalliance review
+        """
+        try:
+            items: list[tuple[str, str, int]] = []  # (kv key, message, re-nudge days)
+
+            days_to = (self.season.start_date - now.date()).days
+            if self.roster.is_empty and days_to <= 7:
+                if days_to > 0:
+                    items.append((
+                        "roster_empty",
+                        f"**Roster is empty** and the premiere is in {days_to} "
+                        "day(s). Fill it via `/addhouseguest` (or season.yaml + "
+                        "redeploy) — extraction stays disabled until then.", 1))
+                else:
+                    items.append((
+                        "roster_empty",
+                        "**The season has started but the roster is EMPTY** — "
+                        "extraction is disabled. `/addhouseguest` now.", 1))
+
+            if self._in_season() and not self.roster.is_empty:
+                week = self.game_state.current_week()
+                days_into = (self.game_state.current_day(now.date()) - 1) % 7
+                state = await self.game_state.current(week)
+                if days_into >= 1 and not state.get("hoh"):
+                    items.append((
+                        f"hoh_missing_w{week}",
+                        f"**No HOH recorded for week {week}.** If the feeds "
+                        f"missed it: `/setgamestate hoh <name>`", 2))
+                if days_into >= 2 and not state.get("nominee"):
+                    items.append((
+                        f"noms_missing_w{week}",
+                        f"**No nominees recorded for week {week}.** If missed: "
+                        f"`/setgamestate nominee <name>` (once per nominee)", 2))
+
+                pending = [a for a in await self.alliances.active()
+                           if not a["locked"] and a["confidence"] >= 0.6]
+                if pending:
+                    lines = "\n".join(
+                        f"  #{a['id']} **{a['name'] or '/'.join(a['members'])}** — "
+                        f"{', '.join(a['members'])} ({a['confidence']:.0%})"
+                        for a in pending[:6])
+                    items.append((
+                        "alliance_review",
+                        f"**{len(pending)} alliance(s) awaiting review:**\n{lines}\n"
+                        "`/alliance <id>` shows the evidence, then "
+                        "`/confirmalliance <id>` or `/rejectalliance <id>`.", 3))
+
+            if not items:
+                return
+            sent: dict = await self.db.kv_get("admin_nudges") or {}
+            due = []
+            for key, msg, renudge_days in items:
+                last = sent.get(key)
+                try:
+                    stale = (last is None or
+                             (now.date() - dt.date.fromisoformat(last)).days >= renudge_days)
+                except (ValueError, TypeError):
+                    stale = True
+                if stale:
+                    due.append((key, msg))
+            if not due:
+                return
+            embed = discord.Embed(
+                title="🔔 Admin to-do", color=0xF39C12,
+                description="\n\n".join(m for _, m in due)[:4000],
+                timestamp=now)
+            embed.set_footer(text="I'll re-nudge each item until it's handled.")
+            if await self._send_admin_dm(embed):
+                for key, _ in due:
+                    sent[key] = now.date().isoformat()
+                await self.db.kv_set("admin_nudges", sent)
+        except Exception as e:
+            log.error("admin nudges failed: %s", e)
+
+    async def _check_feed_stall(self, now: dt.datetime) -> None:
+        """In-season dead-feed detector: if nothing has been ingested for 6+
+        hours, DM the owner once per day. A stalled ingest usually means the
+        Jokers RSS endpoint changed or Bluesky auth broke — silent data loss
+        the channel would never surface."""
+        try:
+            if not self._in_season():
+                return
+            last = await self.db.fetchval("SELECT max(ingested_at) FROM updates")
+            if last is None:
+                return
+            age_h = (dt.datetime.now(dt.timezone.utc) - last).total_seconds() / 3600
+            if age_h < 6:
+                return
+            today = now.date().isoformat()
+            if await self.db.kv_get("stall_alerted_date") == today:
+                return
+            await self.db.kv_set("stall_alerted_date", today)
+            await self._send_admin_dm(discord.Embed(
+                title="⚠️ Feed stall", color=0xE74C3C,
+                description=(f"No feed updates ingested in **{age_h:.0f} hours** "
+                             "during the season. Jokers RSS or Bluesky auth may be "
+                             "down — check the Railway logs."),
+                timestamp=now))
+        except Exception as e:
+            log.error("feed stall check failed: %s", e)
 
     def is_admin(self, interaction: discord.Interaction) -> bool:
         if self.settings.owner_id and interaction.user.id == self.settings.owner_id:
@@ -225,13 +364,30 @@ class BBBot(commands.Bot):
                 for u in new_updates:
                     if recap_airing and u.source == "bluesky":
                         continue
-                    if is_urgent(u):
-                        desc = u.text[:1400]
-                        if u.link:
-                            desc += f"\n\n[source]({u.link})"
-                        await channel.send(embed=discord.Embed(
-                            title="🚨 Breaking", description=desc,
-                            color=0xE74C3C, timestamp=dt.datetime.now(self.tz)))
+                    kw = urgent_keyword(u)
+                    if not kw:
+                        continue
+                    names = _names_in(u.text, self.roster.names)
+                    # Bluesky urgency must reference an actual houseguest —
+                    # kills "who wins HOH tonight??" speculation triggers.
+                    # Jokers RSS is feeds-only and stays trusted as-is.
+                    if u.source == "bluesky" and not self.roster.is_empty and not names:
+                        continue
+                    # Same event via two sources = different wording = different
+                    # hashes, so dedup can't collapse it. Cooldown keyed on
+                    # (keyword + names) means one eviction fires one 🚨 while a
+                    # double-eviction (different names) still fires twice.
+                    key = f"{kw}|{','.join(names)}"
+                    now_mono = time.monotonic()
+                    if now_mono - self._breaking_last.get(key, float("-inf")) < self.BREAKING_COOLDOWN_S:
+                        continue
+                    self._breaking_last[key] = now_mono
+                    desc = u.text[:1400]
+                    if u.link:
+                        desc += f"\n\n[source]({u.link})"
+                    await channel.send(embed=discord.Embed(
+                        title="🚨 Breaking", description=desc,
+                        color=0xE74C3C, timestamp=dt.datetime.now(self.tz)))
 
             if self.llm.available and not self.roster.is_empty:
                 context = await self.house_context()
@@ -289,6 +445,8 @@ class BBBot(commands.Bot):
             for w_start, w_end in windows:
                 await self._summarize_hour(w_start, w_end, post=(w_end == hour_end))
             await self.db.kv_set("last_hourly_end", hour_end.isoformat())
+
+            await self._check_feed_stall(now)
         except Exception as e:
             log.error("hourly loop error: %s", e)
 
@@ -355,12 +513,15 @@ class BBBot(commands.Bot):
                 return
             await self.db.kv_set("last_daily_date", today)
 
+            await self._admin_nudges(now)
+
             if not self._in_season():
                 return  # off-season: no daily recap until the season starts
 
             dissolved = await self.alliances.decay()
             if dissolved:
                 log.info("daily decay dissolved %d alliances", dissolved)
+            await self.relationships.decay()
 
             channel = await self.update_channel()
             if not channel:

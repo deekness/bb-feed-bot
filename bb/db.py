@@ -32,6 +32,9 @@ CREATE TABLE IF NOT EXISTS updates (
     ingested_at   TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_updates_published ON updates(published_at);
+CREATE INDEX IF NOT EXISTS idx_updates_ingested ON updates(ingested_at);
+CREATE INDEX IF NOT EXISTS idx_updates_fts ON updates
+    USING GIN (to_tsvector('english', title || ' ' || body));
 
 CREATE TABLE IF NOT EXISTS alliances (
     id          BIGSERIAL PRIMARY KEY,
