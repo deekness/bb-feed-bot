@@ -1,7 +1,7 @@
 """Slash commands.
 
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
-        /gamestate, /ask, /votes, /houseguest, /week, /roster (+ /zing in zings.py)
+        /gamestate, /ask, /votes, /houseguest, /week, /hamsters (+ /zing in zings.py)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
         /rejectalliance, /setgamestate, /removegamestate, /setchannel, /status,
         /testdm
@@ -280,8 +280,8 @@ class BBCommands(commands.Cog):
         embed = await self.bot.summarizer.weekly_recap(dailies, number, context)
         await interaction.followup.send(embed=embed)
 
-    @app_commands.command(name="roster", description="Show the current season roster and nicknames.")
-    async def roster(self, interaction: discord.Interaction):
+    @app_commands.command(name="hamsters", description="Show the current season roster and nicknames.")
+    async def hamsters(self, interaction: discord.Interaction):
         r = self.bot.roster
         embed = discord.Embed(title=f"📋 {self.bot.season.name} Roster",
                               color=0x2ECC71, timestamp=discord.utils.utcnow())
