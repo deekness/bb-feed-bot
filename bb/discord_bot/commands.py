@@ -1,7 +1,7 @@
 """Slash commands.
 
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
-        /gamestate, /ask, /votes, /houseguest, /week, /hamsters (+ /zing in zings.py)
+        /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds (+ /zing in zings.py)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
         /rejectalliance, /setgamestate, /removegamestate, /setchannel, /status,
         /testdm
@@ -279,6 +279,34 @@ class BBCommands(commands.Cog):
         context = await self.bot.house_context()
         embed = await self.bot.summarizer.weekly_recap(dailies, number, context)
         await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="feeds", description="Are the live feeds LIVE right now, or on Anipals/WBRB?")
+    async def feeds(self, interaction: discord.Interaction):
+        st = await self.bot.db.kv_get("feed_state") or {}
+        if not st.get("state"):
+            await interaction.response.send_message(
+                "No feed-state signal yet. The upstream tracker "
+                "(@feed-bot.bsky.social / feedbot.liquid8d.dev) may not be running "
+                "for this season yet.", ephemeral=True)
+            return
+        import datetime as _dt
+        pretty = {"live": ("🟢", "LIVE"), "anipals": ("🐾", "Anipals"),
+                  "wbrb": ("⏸️", "WBRB")}
+        emoji, label = pretty.get(st["state"], ("❔", st["state"]))
+        embed = discord.Embed(title=f"{emoji} Feeds: {label}", color=0x3498DB)
+        try:
+            since = _dt.datetime.fromisoformat(st["since"])
+            embed.add_field(name="Since", value=f"<t:{int(since.timestamp())}:R>",
+                            inline=True)
+        except (KeyError, ValueError, TypeError):
+            pass
+        if st.get("text"):
+            src = st["text"][:200]
+            if st.get("post_url"):
+                src += f"\n[post]({st['post_url']})"
+            embed.add_field(name="Latest signal", value=src, inline=False)
+        embed.set_footer(text="via @feed-bot.bsky.social")
+        await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="hamsters", description="Show the current season roster and nicknames.")
     async def hamsters(self, interaction: discord.Interaction):

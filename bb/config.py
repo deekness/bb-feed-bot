@@ -50,6 +50,8 @@ class Season:
     bluesky_accounts: list[str]
     bb_keywords: list[str]
     episodes: list[dict] = field(default_factory=list)
+    feedstate_enabled: bool = True
+    feedstate_handle: str = "feed-bot.bsky.social"
 
     @classmethod
     def load(cls, path: str | Path) -> "Season":
@@ -70,6 +72,9 @@ class Season:
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
             bb_keywords=[str(k).lower() for k in (data.get("bb_keywords") or [])],
             episodes=_parse_episodes(data.get("episodes")),
+            feedstate_enabled=bool((data.get("feed_state") or {}).get("enabled", True)),
+            feedstate_handle=str((data.get("feed_state") or {}).get(
+                "handle", "feed-bot.bsky.social")).strip(),
         )
 
 

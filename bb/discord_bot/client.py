@@ -28,6 +28,8 @@ from ..analysis.summarize import Summarizer, urgent_keyword
 from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
+from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
+                                FeedStateMonitor, duration_in)
 from ..ingest.pipeline import IngestPipeline
 from ..ingest.rss import RSSSource
 from ..llm import LLM
@@ -88,6 +90,7 @@ class BBBot(commands.Bot):
 
         sources = [RSSSource(season.rss_url),
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
+        self.feedstate = FeedStateMonitor(season.feedstate_handle)
         self.pipeline = IngestPipeline(self.db, sources)
         self.extractor = Extractor(self.llm, self.roster)
         self.summarizer = Summarizer(self.llm, self.tz)
@@ -119,6 +122,8 @@ class BBBot(commands.Bot):
         self.ingest_loop.start()
         self.hourly_loop.start()
         self.daily_loop.start()
+        if self.season.feedstate_enabled:
+            self.feedstate_loop.start()
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%d guilds)", self.user, len(self.guilds))
@@ -278,6 +283,69 @@ class BBBot(commands.Bot):
                 timestamp=now))
         except Exception as e:
             log.error("feed stall check failed: %s", e)
+
+    # --- live-feed state (via @feed-bot.bsky.social) --------------------------
+    _FEED_STATE_STYLE = {
+        STATE_LIVE:    ("🟢 Feeds are BACK", 0x2ECC71),
+        STATE_ANIPALS: ("🐾 Feeds cut to Anipals", 0xF1C40F),
+        STATE_WBRB:    ("⏸️ WBRB — feeds are down", 0x95A5A6),
+    }
+
+    @tasks.loop(seconds=60)
+    async def feedstate_loop(self) -> None:
+        try:
+            await self._poll_feed_state()
+        except Exception as e:
+            log.error("feedstate loop error: %s", e)
+
+    @feedstate_loop.before_loop
+    async def _before_feedstate(self) -> None:
+        await self.wait_until_ready()
+
+    async def _poll_feed_state(self) -> None:
+        """Track the upstream feed-state account and announce transitions.
+
+        Rules: only a NEW post (unseen url) that CHANGES the state and is
+        FRESH (<10 min old) gets announced — so a restart quietly absorbs
+        history instead of replaying it, and upstream repeats of the same
+        state never double-post. State is always recorded to bot_kv either
+        way so /feeds stays accurate.
+        """
+        if not self._in_season():
+            return
+        sig = await self.feedstate.fetch_signal()
+        if sig is None:
+            return
+        prev = await self.db.kv_get("feed_state") or {}
+        if sig["post_url"] and sig["post_url"] == prev.get("post_url"):
+            return  # nothing new upstream
+        changed = sig["state"] != prev.get("state")
+        fresh = (dt.datetime.now(dt.timezone.utc) - sig["created_at"]
+                 ) <= dt.timedelta(minutes=10)
+        await self.db.kv_set("feed_state", {
+            "state": sig["state"],
+            "since": sig["created_at"].isoformat(),
+            "text": sig["text"][:300],
+            "post_url": sig["post_url"],
+        })
+        if not (changed and fresh):
+            return
+        channel = await self.update_channel()
+        if not channel:
+            return
+        title, color = self._FEED_STATE_STYLE[sig["state"]]
+        if sig["state"] == STATE_LIVE:
+            dur = duration_in(sig["text"])
+            desc = (f"Down for {dur}. Back to the house." if dur
+                    else "Back to the house.")
+        elif sig["state"] == STATE_ANIPALS:
+            desc = "Comp or ceremony is likely underway."
+        else:
+            desc = "Production has the feeds down."
+        embed = discord.Embed(title=title, description=desc, color=color,
+                              timestamp=sig["created_at"])
+        embed.set_footer(text=f"via @{self.feedstate.handle}")
+        await channel.send(embed=embed)
 
     def is_admin(self, interaction: discord.Interaction) -> bool:
         if self.settings.owner_id and interaction.user.id == self.settings.owner_id:
