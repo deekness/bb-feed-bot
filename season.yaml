@@ -33,6 +33,7 @@ roster:
   - LaTrice
   - Lyric
   - Mallory
+  - Melody
   - Rome
   - Taylor
   - Yash
@@ -40,6 +41,7 @@ roster:
 # Map common nicknames/typos -> canonical roster name (case-insensitive).
 nicknames:
   chuck: Chuk
+  jack: Rome
   # kat: Katherine
   # vinny: Vince
 
