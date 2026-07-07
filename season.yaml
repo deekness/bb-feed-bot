@@ -21,19 +21,19 @@ rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 # is revealed, then fill in the full first-name list.
 # ----------------------------------------------------------------------------
 roster: []
-  - Ashley
-  - Barrett
-  - Chuk
-  - Drew
-  - Haley
-  - Jason
-  - Kamu
-  - LaTrice
-  - Lyric
-  - Mallory
-  - Rome
-  - Taylor
-  - Yash
+  - "Ashley"
+  - "Barrett"
+  - "Chuk"
+  - "Drew"
+  - "Haley"
+  - "Jason"
+  - "Kamu"
+  - "LaTrice"
+  - "Lyric"
+  - "Mallory"
+  - "Rome"
+  - "Taylor"
+  - "Yash"
 
 # Map common nicknames/typos -> canonical roster name (case-insensitive).
 nicknames: {}
