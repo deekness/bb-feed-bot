@@ -38,7 +38,8 @@ roster:
   - Yash
 
 # Map common nicknames/typos -> canonical roster name (case-insensitive).
-nicknames: {}
+nicknames:
+  chuck: Chuk
   # kat: Katherine
   # vinny: Vince
 
