@@ -20,26 +20,27 @@ rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 # "random word became an alliance member" problem. Leave empty until the cast
 # is revealed, then fill in the full first-name list.
 # ----------------------------------------------------------------------------
-roster: []
-  - "Ashley"
-  - "Barrett"
-  - "Chuk"
-  - "Drew"
-  - "Haley"
-  - "Jason"
-  - "Kamu"
-  - "LaTrice"
-  - "Lyric"
-  - "Mallory"
-  - "Rome"
-  - "Taylor"
-  - "Yash"
+# BB28 cast — partial reveal (13 of ~16-17). Add the rest here or via
+# /addhouseguest as they drop; both merge at startup.
+roster:
+  - Ashley
+  - Barrett
+  - Chuk
+  - Drew
+  - Haley
+  - Jason
+  - Kamu
+  - LaTrice
+  - Lyric
+  - Mallory
+  - Rome
+  - Taylor
+  - Yash
 
 # Map common nicknames/typos -> canonical roster name (case-insensitive).
 nicknames: {}
-  - Salina: Jason
-  - Chuck: Chuk
-  - Jack: Rome
+  # kat: Katherine
+  # vinny: Vince
 
 # Bluesky accounts to monitor (handles). These are season-agnostic feeds.
 bluesky_accounts:
@@ -51,8 +52,6 @@ bluesky_accounts:
   - taranarmstrong.bsky.social
   - bbfeedsfairy.bsky.social
   - bblionotev.bsky.social
-  - rbbq.bsky.social
-  - bbnutters.bsky.social
 
 # Generic, season-agnostic keywords that mark a post as BB-related.
 # (Roster names are also treated as relevance signals automatically.)
