@@ -21,14 +21,25 @@ rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 # is revealed, then fill in the full first-name list.
 # ----------------------------------------------------------------------------
 roster: []
-  # - Alice
-  # - Bob
-  # - Charlie
+  - Ashley
+  - Barrett
+  - Chuk
+  - Drew
+  - Haley
+  - Jason
+  - Kamu
+  - LaTrice
+  - Lyric
+  - Mallory
+  - Rome
+  - Taylor
+  - Yash
 
 # Map common nicknames/typos -> canonical roster name (case-insensitive).
 nicknames: {}
-  # kat: Katherine
-  # vinny: Vince
+  - Salina: Jason
+  - Chuck: Chuk
+  - Jack: Rome
 
 # Bluesky accounts to monitor (handles). These are season-agnostic feeds.
 bluesky_accounts:
