@@ -277,10 +277,20 @@ class Summarizer:
         system = _NEUTRALITY + " Be concise."
         user = (
             f"{self._ctx(house_context)}"
-            f"Summarize what happened this hour ({hour_label}) in 3-5 short sentences, "
-            f"in chronological order:\n\n{body}"
+            f"Summarize what happened this hour ({hour_label}) in the Big Brother "
+            "house as scannable bullets GROUPED BY TOPIC. Format rules:\n"
+            "- Each topic gets a short bold header on its own line, e.g. "
+            "**Showmance Watch**, **HOH Competition**, **Preseason Buzz** "
+            "(2-4 words; only include topics that actually appear).\n"
+            "- Under each header, 1-3 short bullets, each starting with '- ' and "
+            "kept to a single line.\n"
+            "- Leave a blank line between topic groups.\n"
+            "- Group related updates together; never repeat the same point under "
+            "two headers. One group is fine if that's all there is.\n"
+            "- No intro or closing paragraph — start straight at the first header.\n\n"
+            f"UPDATES:\n{body}"
         )
-        text = await self.llm.text(system, user, max_tokens=700, temperature=0.4)
+        text = await self.llm.text(system, user, max_tokens=700)
         if not text:
             return None
         embed = discord.Embed(
