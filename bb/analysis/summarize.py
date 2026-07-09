@@ -16,6 +16,7 @@ weighted differently from any other.
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 
 import discord
@@ -41,11 +42,57 @@ URGENT_KEYWORDS = (
 )
 
 _NEUTRALITY = (
+    "Never include URLs or markdown links in your output. "
     "You are a neutral Big Brother live-feed reporter. Be factual and "
     "even-handed. Do NOT favor, root for, or criticize any houseguest, and do "
     "not opine on who is playing well or 'deserves' to win beyond what "
     "houseguests themselves say and do."
 )
+
+
+_MD_LINK = re.compile(r"\[([^\]]*)\]\((?:[^)]*)\)")
+_BARE_URL = re.compile(r"https?://\S+")
+
+
+def strip_links(text: str) -> str:
+    """Remove markdown links (keeping their label) and bare URLs. Bot outputs
+    are link-free by policy; raw update texts can carry URLs and the LLM will
+    happily echo them, so LLM output is scrubbed too."""
+    text = _MD_LINK.sub(r"\1", text)
+    text = _BARE_URL.sub("", text)
+    return re.sub(r"[ \t]{2,}", " ", text).strip()
+
+
+def sentence_clamp(text: str, limit: int) -> str:
+    """Fit text into `limit` chars without ever cutting mid-sentence. Prefers
+    the last sentence boundary before the limit; falls back to the last
+    whitespace. No trailing ellipsis — output always reads complete."""
+    text = text.strip()
+    if len(text) <= limit:
+        return text
+    cut = text[:limit]
+    for stop in (". ", "! ", "? ", ".\n", "!\n", "?\n"):
+        idx = cut.rfind(stop)
+        if idx >= int(limit * 0.4):
+            return cut[: idx + 1].rstrip()
+    idx = cut.rfind(" ")
+    return (cut[:idx] if idx > 0 else cut).rstrip()
+
+
+def fit_whole_items(items: list[str], budget: int) -> list[str]:
+    """Take items in order while they fit the budget WHOLE — never truncating
+    an item. If any are left over, append a one-line '+N more' marker."""
+    out: list[str] = []
+    used = 0
+    for i, item in enumerate(items):
+        cost = len(item) + 1
+        if used + cost > budget:
+            remaining = len(items) - i
+            out.append(f"*…and {remaining} more update{'s' if remaining != 1 else ''}*")
+            break
+        out.append(item)
+        used += cost
+    return out
 
 
 def importance(update: Update) -> int:
@@ -142,7 +189,7 @@ class Summarizer:
             return embed
         embed = discord.Embed(
             title=f"Day {day_number} Recap",
-            description=text[:4000], color=0xFF6B35, timestamp=datetime.now(self.tz),
+            description=sentence_clamp(strip_links(text), 4000), color=0xFF6B35, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Built from {len(hourly_summaries)} hourly summaries • {total} updates")
         return embed
@@ -180,7 +227,7 @@ class Summarizer:
                                    max_tokens=800, temperature=0.3)
         embed = discord.Embed(
             title=f"❓ {question[:230]}",
-            description=(text or "Couldn't produce an answer — try rewording.")[:4000],
+            description=sentence_clamp(strip_links(text), 4000) if text else "Couldn't produce an answer — try rewording.",
             color=0x1ABC9C, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Searched archive: {len(matches)} matching updates")
@@ -198,7 +245,7 @@ class Summarizer:
                 f"**{d['period_end'].astimezone(self.tz).strftime('%A %b %d')}**\n{d['content'][:500]}"
                 for d in dailies)
             return discord.Embed(title=f"Week {week_number} Recap",
-                                 description=body[:4000], color=0x8E44AD)
+                                 description=sentence_clamp(body, 4000), color=0x8E44AD)
         blocks = "\n\n".join(
             f"[{d['period_end'].astimezone(self.tz).strftime('%A %b %d')}]\n{d['content']}"
             for d in dailies)
@@ -213,7 +260,7 @@ class Summarizer:
         text = await self.llm.text(_NEUTRALITY, user, max_tokens=1200, temperature=0.4)
         embed = discord.Embed(
             title=f"📆 Week {week_number} Recap",
-            description=(text or "Recap generation failed.")[:4000],
+            description=sentence_clamp(strip_links(text), 4000) if text else "Recap generation failed.",
             color=0x8E44AD, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Built from {len(dailies)} daily recaps")
@@ -234,7 +281,8 @@ class Summarizer:
             return None
         embed = discord.Embed(
             title=f"House Summary — {hour_label}",
-            description=text, color=0x5865F2, timestamp=datetime.now(self.tz),
+            description=sentence_clamp(strip_links(text), 4000),
+            color=0x5865F2, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"{len(updates)} updates this hour")
         return embed
@@ -254,7 +302,8 @@ class Summarizer:
             return None
         embed = discord.Embed(
             title="What's happening right now",
-            description=text, color=0xFF6B35, timestamp=datetime.now(self.tz),
+            description=sentence_clamp(strip_links(text), 4000),
+            color=0xFF6B35, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Based on {total} updates in the last 24h")
         return embed
@@ -268,29 +317,34 @@ class Summarizer:
     # --- pattern fallbacks --------------------------------------------------
     def _pattern_digest(self, updates: list[Update], hour_label: str) -> discord.Embed:
         top = sorted(updates, key=importance, reverse=True)[:8]
-        lines = [f"• {self._linked(u)}" for u in top]
+        items = [f"• {self._clean_item(u)}" for u in top]
         embed = discord.Embed(
             title=f"House Summary — {hour_label}",
-            description="\n".join(lines)[:4000], color=0x9B59B6,
+            description="\n".join(fit_whole_items(items, 3900)), color=0x9B59B6,
             timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"{len(updates)} updates this hour")
         return embed
 
     def _pattern_whats_happening(self, top: list[Update], total: int) -> discord.Embed:
-        lines = [f"{i}. {self._linked(u)}" for i, u in enumerate(top, 1)]
+        items = [f"{i}. {self._clean_item(u)}" for i, u in enumerate(top, 1)]
         embed = discord.Embed(
             title="What's happening right now",
-            description="\n".join(lines)[:4000], color=0xFF6B35,
+            description="\n".join(fit_whole_items(items, 3900)), color=0xFF6B35,
             timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Based on {total} updates in the last 24h")
         return embed
 
-    def _linked(self, u: Update) -> str:
-        text = self._trim(u.text)
-        return f"[{text}]({u.link})" if u.link else text
+    @staticmethod
+    def _clean_item(u: Update) -> str:
+        """One update as display text: link-free and never cut mid-sentence.
+        The 900-char per-item cap only matters for unusually long RSS posts,
+        and even then the cut lands on a sentence boundary."""
+        return sentence_clamp(strip_links(u.text), 900)
 
     @staticmethod
     def _trim(text: str, limit: int = 180) -> str:
+        """LLM-INPUT budgeting only (e.g. /ask context) — never used for
+        anything shown to users."""
         return text if len(text) <= limit else text[: limit - 3] + "..."

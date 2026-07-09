@@ -18,6 +18,8 @@ import discord
 from discord import app_commands
 from discord.ext import commands
 
+from ..analysis.summarize import sentence_clamp as _sent_clamp
+
 log = logging.getLogger("bb.commands")
 
 
@@ -135,12 +137,8 @@ class BBCommands(commands.Cog):
             lines = []
             for e in evidence:
                 ts = e["created_at"].astimezone(self.bot.tz).strftime("%b %d %I:%M %p")
-                quote = (e["quote"] or "").strip()
-                if len(quote) > 150:
-                    quote = quote[:147] + "..."
+                quote = _sent_clamp((e["quote"] or "").strip(), 150)
                 line = f"[{ts}] “{quote}”" if quote else f"[{ts}] (no quote)"
-                if e["link"]:
-                    line += f" — [source]({e['link']})"
                 lines.append(line)
             embed.add_field(name=f"Evidence (latest {len(evidence)})",
                             value="\n".join(lines)[:1024], inline=False)
@@ -301,9 +299,7 @@ class BBCommands(commands.Cog):
         except (KeyError, ValueError, TypeError):
             pass
         if st.get("text"):
-            src = st["text"][:200]
-            if st.get("post_url"):
-                src += f"\n[post]({st['post_url']})"
+            src = _sent_clamp(st["text"], 200)
             embed.add_field(name="Latest signal", value=src, inline=False)
         embed.set_footer(text="via @feed-bot.bsky.social")
         await interaction.response.send_message(embed=embed)

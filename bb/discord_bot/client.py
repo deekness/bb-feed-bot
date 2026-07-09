@@ -24,7 +24,8 @@ import discord
 from discord.ext import commands, tasks
 
 from ..analysis.extract import Extractor
-from ..analysis.summarize import Summarizer, urgent_keyword
+from ..analysis.summarize import (Summarizer, sentence_clamp,
+                                  strip_links, urgent_keyword)
 from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
@@ -284,6 +285,31 @@ class BBBot(commands.Bot):
         except Exception as e:
             log.error("feed stall check failed: %s", e)
 
+    async def _check_llm_health(self, now: dt.datetime) -> None:
+        """DM the admin when summaries have silently degraded to raw lists —
+        either no API key at all, or repeated call failures (dead key, quota,
+        outage). Once per day, only in season, marker advances only if the
+        DM sends."""
+        if not self._in_season():
+            return
+        problem = None
+        if not self.llm.available:
+            problem = ("LLM is OFF — no `ANTHROPIC_API_KEY` on Railway. "
+                       "Summaries and recaps are falling back to raw update lists.")
+        elif self.llm.consecutive_failures >= 3:
+            problem = (f"LLM calls are failing ({self.llm.consecutive_failures} in a "
+                       "row) — check the API key, credit balance, and Railway logs. "
+                       "Summaries are falling back to raw update lists.")
+        if not problem:
+            return
+        today = now.date().isoformat()
+        if await self.db.kv_get("nudge_llm_date") == today:
+            return
+        embed = discord.Embed(title="⚠️ Summaries are degraded",
+                              description=problem, color=0xE67E22)
+        if await self._send_admin_dm(embed):
+            await self.db.kv_set("nudge_llm_date", today)
+
     # --- live-feed state (via @feed-bot.bsky.social) --------------------------
     _FEED_STATE_STYLE = {
         STATE_LIVE:    ("🟢 Feeds are BACK", 0x2ECC71),
@@ -450,9 +476,7 @@ class BBBot(commands.Bot):
                     if now_mono - self._breaking_last.get(key, float("-inf")) < self.BREAKING_COOLDOWN_S:
                         continue
                     self._breaking_last[key] = now_mono
-                    desc = u.text[:1400]
-                    if u.link:
-                        desc += f"\n\n[source]({u.link})"
+                    desc = sentence_clamp(strip_links(u.text), 1400)
                     await channel.send(embed=discord.Embed(
                         title="🚨 Breaking", description=desc,
                         color=0xE74C3C, timestamp=dt.datetime.now(self.tz)))
@@ -513,6 +537,7 @@ class BBBot(commands.Bot):
             for w_start, w_end in windows:
                 await self._summarize_hour(w_start, w_end, post=(w_end == hour_end))
             await self.db.kv_set("last_hourly_end", hour_end.isoformat())
+            await self._check_llm_health(now)
 
             await self._check_feed_stall(now)
         except Exception as e:

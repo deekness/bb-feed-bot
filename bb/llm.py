@@ -56,6 +56,12 @@ class LLM:
         self.model = model
         self.limiter = RateLimiter(rpm, rph)
         self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else None
+        if not self._client:
+            log.warning("LLM DISABLED — no ANTHROPIC_API_KEY. Summaries fall "
+                        "back to raw update lists.")
+        # Consecutive-failure counter: lets the bot notice a dead key/quota
+        # and DM the admin instead of silently degrading to raw lists.
+        self.consecutive_failures = 0
 
     @property
     def available(self) -> bool:
@@ -71,9 +77,12 @@ class LLM:
                 model=self.model, max_tokens=max_tokens, temperature=temperature,
                 system=system, messages=[{"role": "user", "content": user}],
             )
+            self.consecutive_failures = 0
             return "".join(b.text for b in msg.content if b.type == "text").strip()
         except Exception as e:
-            log.error("LLM text call failed: %s", e)
+            self.consecutive_failures += 1
+            log.error("LLM text call failed (%d in a row): %s",
+                      self.consecutive_failures, e)
             return None
 
     async def structured(self, system: str, user: str, *, tool_name: str,
@@ -91,10 +100,13 @@ class LLM:
                 tool_choice={"type": "tool", "name": tool_name},
                 messages=[{"role": "user", "content": user}],
             )
+            self.consecutive_failures = 0
             for block in msg.content:
                 if block.type == "tool_use":
                     return dict(block.input)
             return None
         except Exception as e:
-            log.error("LLM structured call failed: %s", e)
+            self.consecutive_failures += 1
+            log.error("LLM structured call failed (%d in a row): %s",
+                      self.consecutive_failures, e)
             return None
