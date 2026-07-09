@@ -23,9 +23,11 @@ rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 # BB28 cast — partial reveal (13 of ~16-17). Add the rest here or via
 # /addhouseguest as they drop; both merge at startup.
 roster:
+  - Angela
   - Ashley
   - Barrett
   - Chuk
+  - Dee
   - Drew
   - Haley
   - Jason
@@ -34,6 +36,7 @@ roster:
   - Lyric
   - Mallory
   - Melody
+  - Rick
   - Rome
   - Taylor
   - Yash
@@ -44,6 +47,7 @@ nicknames:
   jack: Rome
   lala: LaTrice
   salina: Jason
+  la trice: LaTrice
   # kat: Katherine
   # vinny: Vince
 
