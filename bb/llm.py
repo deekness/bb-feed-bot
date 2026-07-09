@@ -79,7 +79,11 @@ class LLM:
         return self._client is not None
 
     async def text(self, system: str, user: str, *, max_tokens: int = 1500,
-                   temperature: float = 0.4, heavy: bool = False) -> str | None:
+                   temperature: float | None = None, heavy: bool = False) -> str | None:
+        # NOTE: `temperature` is accepted for call-site compatibility but no
+        # longer sent — Sonnet 5 / Opus 4.8 reject non-default sampling params
+        # (HTTP 400 'temperature is deprecated for this model'). Models use
+        # their own default sampling.
         """heavy=True routes to the recap model (daily/weekly recaps); every
         other call uses the workhorse model."""
         if not self._client:
@@ -88,7 +92,7 @@ class LLM:
         try:
             await self.limiter.acquire()
             msg = await self._client.messages.create(
-                model=model, max_tokens=max_tokens, temperature=temperature,
+                model=model, max_tokens=max_tokens,
                 system=system, messages=[{"role": "user", "content": user}],
             )
             self.consecutive_failures = 0
@@ -108,7 +112,7 @@ class LLM:
         try:
             await self.limiter.acquire()
             msg = await self._client.messages.create(
-                model=self.model, max_tokens=max_tokens, temperature=0.2, system=system,
+                model=self.model, max_tokens=max_tokens, system=system,
                 tools=[{"name": tool_name, "description": tool_description,
                         "input_schema": schema}],
                 tool_choice={"type": "tool", "name": tool_name},
