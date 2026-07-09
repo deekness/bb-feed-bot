@@ -81,7 +81,11 @@ class BBBot(commands.Bot):
 
         self.settings = settings
         self.season = season
-        self.tz = ZoneInfo(settings.timezone)
+        self.tz = ZoneInfo(settings.timezone)          # operator/ops clock
+        # The Big Brother house is on US/Pacific. Everything the AUDIENCE reads
+        # as "house time" — hourly headers, the day a recap covers — uses this
+        # fixed clock, independent of where the bot is hosted or TIMEZONE.
+        self.house_tz = ZoneInfo("US/Pacific")
 
         # Components
         self.db = Database(settings.database_url)
@@ -95,7 +99,7 @@ class BBBot(commands.Bot):
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
         self.pipeline = IngestPipeline(self.db, sources)
         self.extractor = Extractor(self.llm, self.roster)
-        self.summarizer = Summarizer(self.llm, self.tz)
+        self.summarizer = Summarizer(self.llm, self.house_tz)
         self.alliances = AllianceTracker(self.db)
         self.relationships = RelationshipTracker(self.db)
         self.game_state = GameStateTracker(self.db, season.start_date)
@@ -516,7 +520,7 @@ class BBBot(commands.Bot):
         current hour is posted to the channel. Catch-up is capped at 24
         windows so a long outage can't flood the LLM."""
         try:
-            now = dt.datetime.now(self.tz)
+            now = dt.datetime.now(self.house_tz)
             hour_end = now.replace(minute=0, second=0, microsecond=0)
 
             windows: list[tuple[dt.datetime, dt.datetime]] = []
@@ -524,7 +528,7 @@ class BBBot(commands.Bot):
             last_end: dt.datetime | None = None
             if isinstance(last_iso, str):
                 try:
-                    last_end = dt.datetime.fromisoformat(last_iso).astimezone(self.tz)
+                    last_end = dt.datetime.fromisoformat(last_iso).astimezone(self.house_tz)
                 except ValueError:
                     last_end = None
             if last_end is None or last_end >= hour_end:
@@ -595,19 +599,20 @@ class BBBot(commands.Bot):
 
     @tasks.loop(minutes=15)
     async def daily_loop(self) -> None:
-        """Fires on the first tick at/after 06:00 local. Markers live in
-        bot_kv, so a restart can neither double-post a recap nor permanently
-        skip a day the bot happened to be down at 6am."""
+        """Fires on the first tick at/after 08:00 Pacific (Big Brother house
+        time) and recaps the PREVIOUS house day. Markers live in bot_kv, so a
+        restart can neither double-post a recap nor permanently skip a day the
+        bot was down for at 8am."""
         try:
-            now = dt.datetime.now(self.tz)
-            if now.hour < 6:
+            now_house = dt.datetime.now(self.house_tz)
+            if now_house.hour < 8:
                 return
-            today = now.date().isoformat()
-            if await self.db.kv_get("last_daily_date") == today:
+            today_house = now_house.date()
+            if await self.db.kv_get("last_daily_date") == today_house.isoformat():
                 return
-            await self.db.kv_set("last_daily_date", today)
+            await self.db.kv_set("last_daily_date", today_house.isoformat())
 
-            await self._admin_nudges(now)
+            await self._admin_nudges(now_house)
 
             if not self._in_season():
                 return  # off-season: no daily recap until the season starts
@@ -621,17 +626,20 @@ class BBBot(commands.Bot):
             if not channel:
                 return
 
-            # Window anchored to the 06:00 boundary, not the fire time, so a
-            # late fire (post-outage) still covers exactly yesterday-6am ->
-            # today-6am.
-            end_local = now.replace(hour=6, minute=0, second=0, microsecond=0)
-            end_utc = end_local.astimezone(dt.timezone.utc)
-            start_utc = end_utc - dt.timedelta(hours=24)
+            # Recap the previous house day: midnight -> midnight Pacific of
+            # yesterday, titled with THAT day's house-day number (e.g. an 8am
+            # recap on Day 2 covers and is titled "Day 1").
+            yesterday_house = today_house - dt.timedelta(days=1)
+            day_number = self.game_state.current_day(yesterday_house)
+            start_utc = dt.datetime.combine(
+                yesterday_house, dt.time.min, self.house_tz).astimezone(dt.timezone.utc)
+            end_utc = dt.datetime.combine(
+                today_house, dt.time.min, self.house_tz).astimezone(dt.timezone.utc)
             hourlies = await self.db.summaries_between("hourly", start_utc, end_utc)
             fallback = await self.db.recent_updates(24)
             context = await self.house_context()
             embed = await self.summarizer.daily_recap(
-                hourlies, fallback, self.game_state.current_day(now.date()), context)
+                hourlies, fallback, day_number, context)
             await channel.send(embed=embed)
             if embed.description:
                 await self.db.add_summary("daily", start_utc, end_utc,
@@ -643,16 +651,16 @@ class BBBot(commands.Bot):
             # on the boundary morning, the recap self-heals the next morning
             # instead of being dropped. Window is computed from the week
             # number (same math as /week), not "last 7 days from now".
-            completed = (now.date() - self.season.start_date).days // 7
+            completed = (today_house - self.season.start_date).days // 7
             last_weekly = int(await self.db.kv_get("last_weekly") or 0)
             if completed >= 1 and completed > last_weekly:
                 await self.db.kv_set("last_weekly", completed)
                 wk_start_date = self.season.start_date + dt.timedelta(days=7 * (completed - 1))
                 wk_end_date = wk_start_date + dt.timedelta(days=7)
                 wk_start = dt.datetime.combine(
-                    wk_start_date, dt.time.min, self.tz).astimezone(dt.timezone.utc)
+                    wk_start_date, dt.time.min, self.house_tz).astimezone(dt.timezone.utc)
                 wk_end = dt.datetime.combine(
-                    wk_end_date, dt.time.max, self.tz).astimezone(dt.timezone.utc)
+                    wk_end_date, dt.time.max, self.house_tz).astimezone(dt.timezone.utc)
                 dailies = await self.db.summaries_between("daily", wk_start, wk_end)
                 wembed = await self.summarizer.weekly_recap(dailies, completed, context)
                 await channel.send(embed=wembed)
