@@ -182,7 +182,7 @@ class Summarizer:
             "Cover the whole day — do not drop threads that only appear in one "
             f"hour.\n\nHOURLY SUMMARIES:\n\n{body}"
         )
-        text = await self.llm.text(system, user, max_tokens=1000, temperature=0.4)
+        text = await self.llm.text(system, user, max_tokens=1000, temperature=0.4, heavy=True)
         if not text:
             embed = await self.whats_happening(fallback_updates, house_context)
             embed.title = f"Day {day_number} Recap"
@@ -257,7 +257,7 @@ class Summarizer:
             "2. 5-8 bullets of key developments, chronological.\n"
             f"3. One line on where things stand going into next week.\n\nDAILY RECAPS:\n\n{blocks}"
         )
-        text = await self.llm.text(_NEUTRALITY, user, max_tokens=1200, temperature=0.4)
+        text = await self.llm.text(_NEUTRALITY, user, max_tokens=1200, temperature=0.4, heavy=True)
         embed = discord.Embed(
             title=f"📆 Week {week_number} Recap",
             description=sentence_clamp(strip_links(text), 4000) if text else "Recap generation failed.",

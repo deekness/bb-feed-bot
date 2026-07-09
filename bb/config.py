@@ -84,6 +84,7 @@ class Settings:
     database_url: str
     anthropic_api_key: str
     llm_model: str
+    llm_model_recap: str
     update_channel_id: int | None
     owner_id: int | None
     timezone: str
@@ -108,6 +109,7 @@ class Settings:
             database_url=required("DATABASE_URL"),
             anthropic_api_key=os.getenv("ANTHROPIC_API_KEY", "").strip(),
             llm_model=os.getenv("LLM_MODEL", "claude-haiku-4-5-20251001"),
+            llm_model_recap=os.getenv("LLM_MODEL_RECAP", "").strip(),
             update_channel_id=opt_int("UPDATE_CHANNEL_ID"),
             owner_id=opt_int("OWNER_ID"),
             timezone=os.getenv("TIMEZONE", "US/Pacific"),

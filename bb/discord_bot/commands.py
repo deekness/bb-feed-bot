@@ -494,7 +494,12 @@ class BBCommands(commands.Cog):
         embed = discord.Embed(title="Bot Status", color=0x2ECC71)
         embed.add_field(name="Season", value=f"{self.bot.season.name} (week {self.bot.game_state.current_week()})", inline=False)
         embed.add_field(name="Roster", value=f"{len(self.bot.roster.names)} houseguests", inline=True)
-        embed.add_field(name="LLM", value="✅ on" if self.bot.llm.available else "❌ off (pattern mode)", inline=True)
+        if self.bot.llm.available:
+            wm, rm = self.bot.llm.model, self.bot.llm.recap_model
+            llm_val = f"✅ {wm}" + (f"\nrecap: {rm}" if rm != wm else "")
+        else:
+            llm_val = "❌ off (pattern mode)"
+        embed.add_field(name="LLM", value=llm_val, inline=False)
         embed.add_field(name="Channel", value=channel.mention if channel else "not set", inline=True)
         embed.add_field(name="Updates (last hour)", value=str(len(recent)), inline=True)
         import datetime as _dt

@@ -86,7 +86,8 @@ class BBBot(commands.Bot):
         # Components
         self.db = Database(settings.database_url)
         self.llm = LLM(settings.anthropic_api_key, settings.llm_model,
-                       settings.llm_rpm, settings.llm_rph)
+                       settings.llm_rpm, settings.llm_rph,
+                       recap_model=settings.llm_model_recap)
         self.roster = Roster.from_season(season)
 
         sources = [RSSSource(season.rss_url),

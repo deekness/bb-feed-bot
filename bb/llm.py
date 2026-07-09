@@ -52,13 +52,24 @@ class RateLimiter:
 
 
 class LLM:
-    def __init__(self, api_key: str, model: str, rpm: int, rph: int):
+    def __init__(self, api_key: str, model: str, rpm: int, rph: int,
+                 recap_model: str = ""):
         self.model = model
+        # Recaps (daily/weekly) are low-volume, prose-quality-critical calls, so
+        # they can run on a stronger/pricier model than the high-volume
+        # extraction + hourly grind. Empty LLM_MODEL_RECAP => same model as
+        # everything else, i.e. the split is a no-op until you opt in.
+        self.recap_model = recap_model.strip() or model
         self.limiter = RateLimiter(rpm, rph)
         self._client = anthropic.AsyncAnthropic(api_key=api_key) if api_key else None
         if not self._client:
             log.warning("LLM DISABLED — no ANTHROPIC_API_KEY. Summaries fall "
                         "back to raw update lists.")
+        elif self.recap_model != self.model:
+            log.info("LLM ready — workhorse=%s, recap=%s", self.model, self.recap_model)
+        else:
+            log.info("LLM ready — %s (recaps use the same model; set "
+                     "LLM_MODEL_RECAP to split)", self.model)
         # Consecutive-failure counter: lets the bot notice a dead key/quota
         # and DM the admin instead of silently degrading to raw lists.
         self.consecutive_failures = 0
@@ -68,13 +79,16 @@ class LLM:
         return self._client is not None
 
     async def text(self, system: str, user: str, *, max_tokens: int = 1500,
-                   temperature: float = 0.4) -> str | None:
+                   temperature: float = 0.4, heavy: bool = False) -> str | None:
+        """heavy=True routes to the recap model (daily/weekly recaps); every
+        other call uses the workhorse model."""
         if not self._client:
             return None
+        model = self.recap_model if heavy else self.model
         try:
             await self.limiter.acquire()
             msg = await self._client.messages.create(
-                model=self.model, max_tokens=max_tokens, temperature=temperature,
+                model=model, max_tokens=max_tokens, temperature=temperature,
                 system=system, messages=[{"role": "user", "content": user}],
             )
             self.consecutive_failures = 0
