@@ -160,6 +160,45 @@ class Summarizer:
                 return embed
         return self._pattern_whats_happening(top[:5], len(updates))
 
+    # --- episode recap (grouped digest of an aired episode's chatter) -------
+    async def episode_recap(self, updates: list[Update], label: str,
+                            house_context: str = "") -> discord.Embed | None:
+        """Recap ONE aired episode from the feed/viewer posts during and just
+        after it. Episode chatter is exactly what we want here (people
+        live-posting the broadcast), so there is no feed-gating. Grouped-bullet
+        format, on the recap model."""
+        if not updates:
+            return None
+        body = "\n".join(f"- {u.text}"
+                          for u in sorted(updates, key=lambda u: u.published_at))
+        system = _NEUTRALITY + " Be concise."
+        user = (
+            f"{self._ctx(house_context)}"
+            f"Below are feed updates and viewer posts from during and just after "
+            f"tonight's Big Brother episode ({label}). Summarize WHAT HAPPENED ON "
+            "THE EPISODE as scannable bullets GROUPED BY TOPIC. Format rules:\n"
+            "- Short bold topic headers on their own line, e.g. **Safety "
+            "Competition**, **HOH Competition**, **Nomination Ceremony**, "
+            "**Eviction**, **Twist**, **Notable Moments** (only topics that "
+            "appear).\n"
+            "- Under each header, concise bullets starting with '- ', one line each.\n"
+            "- Blank line between groups.\n"
+            "- Report confirmed on-screen events as fact; clearly mark anything "
+            "that is only fan speculation or reaction as such.\n"
+            "- No intro or closing paragraph — start at the first header.\n\n"
+            f"UPDATES:\n{body}"
+        )
+        text = await self.llm.text(system, user, max_tokens=1200, heavy=True)
+        if not text:
+            return None
+        embed = discord.Embed(
+            title=f"📺 Episode Recap — {label}",
+            description=sentence_clamp(strip_links(text), 4000),
+            color=0xF1C40F, timestamp=datetime.now(self.tz),
+        )
+        embed.set_footer(text=f"{len(updates)} updates during & after the episode")
+        return embed
+
     # --- daily recap (map-reduce over stored hourly summaries) --------------
     async def daily_recap(self, hourly_summaries: list[dict],
                           fallback_updates: list[Update], day_number: int,

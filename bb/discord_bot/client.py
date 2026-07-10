@@ -409,6 +409,79 @@ class BBBot(commands.Bot):
                 return ep
         return None
 
+    EPISODE_RECAP_BUFFER_MIN = 90   # minutes after an episode ends to capture reactions
+
+    @staticmethod
+    def _ep_key(day, ep) -> str:
+        return f"{day.isoformat()}:{ep['start_min']}"
+
+    def _ep_window(self, day, ep) -> tuple[dt.datetime, dt.datetime]:
+        """(start_utc, end_utc+buffer) for episode `ep` occurring on local `day`."""
+        start_local = dt.datetime.combine(
+            day, dt.time(ep["start_min"] // 60, ep["start_min"] % 60), self.tz)
+        end_local = dt.datetime.combine(
+            day, dt.time(ep["end_min"] // 60, ep["end_min"] % 60), self.tz)
+        end_local += dt.timedelta(minutes=self.EPISODE_RECAP_BUFFER_MIN)
+        return start_local.astimezone(dt.timezone.utc), end_local.astimezone(dt.timezone.utc)
+
+    def _recent_episode(self) -> tuple | None:
+        """The most recently-FINISHED episode (including buffer): returns
+        (key, start_utc, end_utc, label) or None if none in the last 8 days."""
+        now = dt.datetime.now(self.tz)
+        best = None
+        for back in range(0, 8):
+            day = now.date() - dt.timedelta(days=back)
+            for ep in self.season.episodes:
+                if day.weekday() != ep["weekday"]:
+                    continue
+                start_utc, end_utc = self._ep_window(day, ep)
+                if end_utc <= now.astimezone(dt.timezone.utc):
+                    label = start_utc.astimezone(self.tz).strftime("%a %b %d")
+                    if best is None or start_utc > best[1]:
+                        best = (self._ep_key(day, ep), start_utc, end_utc, label)
+        return best
+
+    async def _generate_episode_recap(self, start_utc, end_utc, label,
+                                      *, force: bool) -> discord.Embed | None:
+        updates = await self.db.updates_between(start_utc, end_utc)
+        if not updates:
+            return None
+        context = await self.house_context()
+        return await self.summarizer.episode_recap(updates, label, context)
+
+    async def _maybe_post_episode_recap(self) -> None:
+        """Auto-post an episode recap once the episode window + buffer has
+        elapsed. State in bot_kv (last recapped key) makes it fire exactly once
+        and survive restarts; a long outage self-heals (fires late, not never)."""
+        if not self._in_season():
+            return
+        rec = self._recent_episode()
+        if not rec:
+            return
+        key, start_utc, end_utc, label = rec
+        last = await self.db.kv_get("last_episode_recap")
+        if last is None:
+            # First run of this feature: seed the marker instead of back-filling
+            # a recap for an already-aired episode. Auto-recaps begin with the
+            # next episode; use /episoderecap to get the most recent one now.
+            await self.db.kv_set("last_episode_recap", key)
+            return
+        if last == key:
+            return  # already done
+        # Only fire once we are actually past the (buffered) end.
+        if dt.datetime.now(dt.timezone.utc) < end_utc:
+            return
+        embed = await self._generate_episode_recap(start_utc, end_utc, label, force=False)
+        # Mark done regardless of whether there was content, so an empty episode
+        # window doesn't get retried every tick.
+        await self.db.kv_set("last_episode_recap", key)
+        if not embed:
+            return
+        channel = await self.update_channel()
+        if channel:
+            await channel.send(embed=embed)
+            log.info("posted episode recap for %s", label)
+
     def _next_ant_line(self) -> str:
         if not self._ant_bag:
             import random
@@ -485,6 +558,8 @@ class BBBot(commands.Bot):
                 else:
                     self.ingest_loop.change_interval(minutes=2)
                     log.info("live-show mode OFF: polling every 2m")
+
+            await self._maybe_post_episode_recap()
 
             new_updates = await self.pipeline.run()
             if not new_updates:

@@ -1,7 +1,7 @@
 """Slash commands.
 
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
-        /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds (+ /zing in zings.py)
+        /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
         /rejectalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /status,
         /testdm
@@ -281,6 +281,25 @@ class BBCommands(commands.Cog):
         dailies = await self.bot.db.summaries_between("daily", start, end)
         context = await self.bot.house_context()
         embed = await self.bot.summarizer.weekly_recap(dailies, number, context)
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(name="episoderecap",
+                          description="Recap the most recent Big Brother episode.")
+    async def episoderecap(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        rec = self.bot._recent_episode()
+        if not rec:
+            await interaction.followup.send(
+                "No aired episode found in the last week to recap.", ephemeral=True)
+            return
+        _key, start_utc, end_utc, label = rec
+        embed = await self.bot._generate_episode_recap(
+            start_utc, end_utc, label, force=True)
+        if not embed:
+            await interaction.followup.send(
+                f"No updates were captured during the {label} episode window "
+                "to recap.", ephemeral=True)
+            return
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="feeds", description="Are the live feeds LIVE right now, or on Anipals/WBRB?")
