@@ -78,6 +78,10 @@ class RelationshipTracker:
 
     @staticmethod
     def _label(affinity: float, kind: str) -> str | None:
+        # A betrayal is the juiciest relationship beat in the game, so it gets
+        # its own label instead of melting into a generic "rivals" score.
+        if kind == "betrayal":
+            return "betrayed"
         if kind in ("showmance_start", "showmance_end"):
             return "showmance" if affinity > 0 else None
         if affinity >= 0.4:
@@ -103,13 +107,21 @@ class RelationshipTracker:
         )
         await self.db.execute(
             "UPDATE relationships SET label = NULL "
-            "WHERE label IN ('allies', 'rivals') AND abs(affinity) < 0.4"
+            "WHERE label IN ('allies', 'rivals', 'betrayed') AND abs(affinity) < 0.4"
         )
+
+    async def notable(self, limit: int = 12) -> list[dict]:
+        """Labeled pairs (allies / rivals / betrayed / showmance), strongest
+        first — the relationship state a recap should weave in."""
+        rows = await self.db.fetch(
+            "SELECT hg_a, hg_b, affinity, label, last_event FROM relationships "
+            "WHERE label IS NOT NULL ORDER BY abs(affinity) DESC LIMIT $1", limit)
+        return [dict(r) for r in rows]
 
     async def for_houseguest(self, name: str) -> list[dict]:
         rows = await self.db.fetch(
             """
-            SELECT hg_a, hg_b, affinity, label FROM relationships
+            SELECT hg_a, hg_b, affinity, label, last_event FROM relationships
             WHERE hg_a = $1 OR hg_b = $1
             ORDER BY abs(affinity) DESC
             """,
@@ -118,5 +130,6 @@ class RelationshipTracker:
         out = []
         for r in rows:
             other = r["hg_b"] if r["hg_a"] == name else r["hg_a"]
-            out.append({"other": other, "affinity": r["affinity"], "label": r["label"]})
+            out.append({"other": other, "affinity": r["affinity"],
+                        "label": r["label"], "last_event": r["last_event"]})
         return out

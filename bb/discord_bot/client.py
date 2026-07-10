@@ -430,6 +430,29 @@ class BBBot(commands.Bot):
             log.error("house_context failed: %s", e)
         return " ".join(parts)
 
+    async def recap_context(self) -> str:
+        """house_context plus the tracked relationship beats and vote board —
+        the richer state a daily/weekly recap should narrate around. Extraction
+        keeps using the leaner house_context; only recaps need this."""
+        base = await self.house_context()
+        if self.roster.is_empty:
+            return base
+        extras: list[str] = []
+        try:
+            rel = await self.relationships.notable()
+            if rel:
+                bits = [f"{r['hg_a']} & {r['hg_b']} ({r['label']})" for r in rel]
+                extras.append("Relationship beats: " + "; ".join(bits) + ".")
+            counts = await self.votes.current(self.game_state.current_week())
+            if counts:
+                board = "; ".join(
+                    f"{len(v)} to evict {t}" for t, v in
+                    sorted(counts.items(), key=lambda kv: len(kv[1]), reverse=True))
+                extras.append("Vote board: " + board + ".")
+        except Exception as e:
+            log.error("recap_context failed: %s", e)
+        return (base + " " + " ".join(extras)).strip()
+
     # --- loops --------------------------------------------------------------
     @tasks.loop(minutes=2)
     async def ingest_loop(self) -> None:
@@ -637,7 +660,7 @@ class BBBot(commands.Bot):
                 today_house, dt.time.min, self.house_tz).astimezone(dt.timezone.utc)
             hourlies = await self.db.summaries_between("hourly", start_utc, end_utc)
             fallback = await self.db.recent_updates(24)
-            context = await self.house_context()
+            context = await self.recap_context()
             embed = await self.summarizer.daily_recap(
                 hourlies, fallback, day_number, context)
             await channel.send(embed=embed)

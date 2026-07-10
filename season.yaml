@@ -49,6 +49,7 @@ nicknames:
   salina: Jason
   la trice: LaTrice
   rick: Devens
+  rick devens: Devens
   # kat: Katherine
   # vinny: Vince
 
@@ -77,14 +78,43 @@ bb_keywords:
   - "hoh"
   - "power of veto"
   - "veto"
+  - "veto meeting"
   - "nomination"
+  - "nomination ceremony"
   - "nominated"
+  - "noms"
+  - "on the block"
+  - "the block"
+  - "pawn"
   - "eviction"
   - "evicted"
   - "alliance"
+  - "final 2"
+  - "final two"
+  - "f2"
+  - "final 3"
+  - "final 4"
+  - "ride or die"
+  - "final deal"
   - "showmance"
   - "diary room"
   - "have not"
+  - "backdoor"
+  - "target"
+  - "campaign"
+  - "campaigning"
+  - "blindside"
+  - "flip"
+  - "flipping"
+  - "split the vote"
+  - "throw the comp"
+  - "throw it"
+  - "battle back"
+  - "jury"
+  - "safety"
+  - "power of invincibility"
+  - "double eviction"
+  - "work together"
 
 # ----------------------------------------------------------------------------
 # EPISODE SCHEDULE (times are in the bot's TIMEZONE env, 24h HH:MM).

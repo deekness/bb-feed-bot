@@ -37,8 +37,11 @@ _IMPORTANCE = {
 
 URGENT_KEYWORDS = (
     "evicted", "eviction", "wins hoh", "won hoh", "wins veto", "won veto",
-    "wins the veto", "self-evict", "expelled", "quit the game", "backdoor",
-    "blindside", "removed from the house", "medical",
+    "wins the veto", "self-evict", "self-evicted", "expelled", "ejected",
+    "quit the game", "walked out", "removed from the house", "removed from the game",
+    "backdoor", "backdoored", "blindside", "blindsided", "medical",
+    "returns to the house", "re-enters", "battle back", "double eviction",
+    "triple eviction", "diamond veto", "coup", "pandora",
 )
 
 _NEUTRALITY = (
@@ -181,7 +184,11 @@ class Summarizer:
             f"{self._ctx(house_context)}"
             "Below are the hour-by-hour summaries for the last day in the Big "
             "Brother house. Write a day recap:\n"
-            "1. A short paragraph capturing the day's main storyline(s).\n"
+            "1. A short narrative paragraph on the day's main storyline(s). Where "
+            "the CURRENT HOUSE STATE shows alliances, relationship beats "
+            "(especially betrayals), or a vote board, use them to frame WHY the "
+            "day mattered — how alliances shifted or who turned on whom — rather "
+            "than just listing events.\n"
             "2. 4-7 bullet points of the key developments, chronological.\n"
             "Cover the whole day — do not drop threads that only appear in one "
             f"hour.\n\nHOURLY SUMMARIES:\n\n{body}"
@@ -257,7 +264,10 @@ class Summarizer:
             f"{self._ctx(house_context)}"
             f"Below are the daily recaps for week {week_number} in the Big Brother "
             "house. Write the week's story:\n"
-            "1. A paragraph on the week's arc (HOH -> noms -> veto -> eviction if known).\n"
+            "1. A paragraph on the week's arc (HOH -> noms -> veto -> eviction if "
+            "known), using the CURRENT HOUSE STATE — alliances, relationship beats, "
+            "betrayals, the vote board — to explain the power shifts, not just the "
+            "sequence of comps.\n"
             "2. 5-8 bullets of key developments, chronological.\n"
             f"3. One line on where things stand going into next week.\n\nDAILY RECAPS:\n\n{blocks}"
         )

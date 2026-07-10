@@ -26,15 +26,16 @@ class VoteTracker:
             try:
                 await self.db.execute(
                     """
-                    INSERT INTO vote_plans (week, voter, target, confidence, evidence, source_hash)
-                    VALUES ($1, $2, $3, $4, $5, $6)
+                    INSERT INTO vote_plans (week, voter, target, confidence, evidence,
+                                            firmness, source_hash)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
                     ON CONFLICT (week, voter) DO UPDATE
                     SET target = EXCLUDED.target, confidence = EXCLUDED.confidence,
-                        evidence = EXCLUDED.evidence, source_hash = EXCLUDED.source_hash,
-                        updated_at = now()
+                        evidence = EXCLUDED.evidence, firmness = EXCLUDED.firmness,
+                        source_hash = EXCLUDED.source_hash, updated_at = now()
                     """,
                     week, p.voter, p.target, p.confidence, p.evidence[:500],
-                    getattr(p, "source_hash", ""),
+                    getattr(p, "firmness", "leaning"), getattr(p, "source_hash", ""),
                 )
             except Exception as e:
                 log.error("vote ingest failed: %s", e)
@@ -53,7 +54,7 @@ class VoteTracker:
             "SELECT max(set_at) FROM game_state WHERE role = 'evicted'")
         rows = await self.db.fetch(
             """
-            SELECT DISTINCT ON (voter) voter, target
+            SELECT DISTINCT ON (voter) voter, target, firmness
             FROM vote_plans
             WHERE week BETWEEN $1 AND $2
               AND ($3::timestamptz IS NULL OR updated_at > $3)
@@ -63,11 +64,11 @@ class VoteTracker:
         )
         evicted = {r["houseguest"] for r in await self.db.fetch(
             "SELECT houseguest FROM game_state WHERE role = 'evicted'")}
-        counts: dict[str, list[str]] = {}
+        counts: dict[str, list[tuple[str, str]]] = {}
         for r in rows:
             if r["voter"] in evicted or r["target"] in evicted:
                 continue
-            counts.setdefault(r["target"], []).append(r["voter"])
+            counts.setdefault(r["target"], []).append((r["voter"], r["firmness"]))
         return counts
 
     async def remove(self, voter: str, week: int) -> bool:

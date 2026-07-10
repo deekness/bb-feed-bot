@@ -52,6 +52,10 @@ _SCHEMA = {
                              "description": "Only if the houseguests explicitly named it; else null."},
                     "members": {"type": "array", "items": {"type": "string"},
                                 "description": "Houseguest first names. Only people who are clearly part of it."},
+                    "one_sided": {"type": "boolean",
+                                  "description": "True ONLY if the text shows the deal is not mutual — "
+                                                 "one member trusts it while another is privately playing "
+                                                 "or planning against them. Default false."},
                     "status": {"type": "string",
                                "enum": ["forming", "active", "fracturing", "dissolved"]},
                     "confidence": {"type": "number",
@@ -104,6 +108,10 @@ _SCHEMA = {
                               "description": "The houseguest casting the vote."},
                     "target": {"type": "string",
                                "description": "Who the voter says they will vote to EVICT."},
+                    "firmness": {"type": "string", "enum": ["locked", "leaning", "unsure"],
+                                 "description": "How firm the intention reads: 'locked' = definite/"
+                                                "'100%', 'leaning' = probable, 'unsure' = wavering/"
+                                                "considering. Default 'leaning'."},
                     "confidence": {"type": "number",
                                    "description": "0..1: only stated/clearly implied vote intentions."},
                     "evidence": {"type": "string"},
@@ -153,7 +161,14 @@ class Extractor:
             "source_index of the NEW update it came from. If you cannot quote support, "
             "do not include the item.\n"
             "- A vote plan requires the voter stating or clearly implying who they "
-            "will vote to evict this week — not who they dislike.\n"
+            "will vote to evict this week — not who they dislike. Set 'firmness' to "
+            "'locked' only for definite statements ('100%', 'for sure'), 'unsure' when "
+            "they are wavering, else 'leaning'.\n"
+            "- Mark an alliance 'one_sided' ONLY when the text clearly shows the deal "
+            "isn't mutual (one side trusts it while another schemes against them). When "
+            "in doubt, leave it false.\n"
+            "- A final-2 or final-3 deal IS an alliance — record it with just those two "
+            "or three members; do not fold it into a larger group.\n"
             "- Return empty arrays rather than guessing."
         )
         if episode_airing:
@@ -207,6 +222,7 @@ class Extractor:
                 confidence=_clamp(a.get("confidence", 0.5)),
                 evidence=str(a.get("evidence", ""))[:500],
                 name=_clean_name(a.get("name")),
+                one_sided=bool(a.get("one_sided", False)),
                 source_hash=src(a),
             ))
 
@@ -235,10 +251,14 @@ class Extractor:
             target = self.roster.resolve(v.get("target"))
             if not voter or not target or voter == target:
                 continue
+            firmness = str(v.get("firmness", "leaning")).lower()
+            if firmness not in ("locked", "leaning", "unsure"):
+                firmness = "leaning"
             result.vote_plans.append(VotePlan(
                 voter=voter, target=target,
                 confidence=_clamp(v.get("confidence", 0.5)),
                 evidence=str(v.get("evidence", ""))[:500],
+                firmness=firmness,
                 source_hash=src(v),
             ))
 

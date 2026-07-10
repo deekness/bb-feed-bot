@@ -163,7 +163,8 @@ class BBCommands(commands.Cog):
             lines = []
             for r in rels[:12]:
                 tag = f" ({r['label']})" if r["label"] else ""
-                arrow = "📈" if r["affinity"] > 0 else "📉" if r["affinity"] < 0 else "➖"
+                arrow = ("🔪" if r["label"] == "betrayed" else
+                         "📈" if r["affinity"] > 0 else "📉" if r["affinity"] < 0 else "➖")
                 lines.append(f"{arrow} **{r['other']}**{tag} — {r['affinity']:+.2f}")
             embed.description = "\n".join(lines)
         await interaction.followup.send(embed=embed)
@@ -211,12 +212,15 @@ class BBCommands(commands.Cog):
         if not counts:
             embed.description = "No evidenced vote plans tracked yet this week."
         else:
+            mark = {"locked": "🔒", "unsure": "❔", "leaning": ""}
             ranked = sorted(counts.items(), key=lambda kv: len(kv[1]), reverse=True)
             for target, voters in ranked:
+                shown = ", ".join(
+                    f"{v}{(' ' + mark[f]) if mark.get(f) else ''}" for v, f in voters)
                 embed.add_field(name=f"To evict {target} — {len(voters)}",
-                                value=", ".join(voters), inline=False)
+                                value=shown, inline=False)
             embed.set_footer(text="Latest stated plan per voter since the last eviction. "
-                                  "Houseguests flip — snapshot, not a lock.")
+                                  "🔒 locked · ❔ unsure. Houseguests flip — snapshot, not a lock.")
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="houseguest", description="Everything tracked about one houseguest.")
@@ -249,7 +253,8 @@ class BBCommands(commands.Cog):
             lines = []
             for r in rels[:8]:
                 tag = f" ({r['label']})" if r["label"] else ""
-                arrow = "📈" if r["affinity"] > 0 else "📉" if r["affinity"] < 0 else "➖"
+                arrow = ("🔪" if r["label"] == "betrayed" else
+                         "📈" if r["affinity"] > 0 else "📉" if r["affinity"] < 0 else "➖")
                 lines.append(f"{arrow} **{r['other']}**{tag} {r['affinity']:+.2f}")
             embed.add_field(name="Relationships", value="\n".join(lines), inline=False)
 
@@ -526,4 +531,10 @@ class BBCommands(commands.Cog):
         lock = "🔒 " if a["locked"] else ""
         name = a["name"] or "/".join(a["members"])
         members = ", ".join(a["members"])
-        return f"{lock}**#{a['id']} {name}** — {members}  ({a['confidence']:.0%})"
+        tags = []
+        if len(a["members"]) == 2:
+            tags.append("final 2")
+        if a.get("one_sided"):
+            tags.append("⚠️ one-sided")
+        suffix = f"  _{' · '.join(tags)}_" if tags else ""
+        return f"{lock}**#{a['id']} {name}** — {members}  ({a['confidence']:.0%}){suffix}"

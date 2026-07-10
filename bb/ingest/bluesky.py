@@ -45,7 +45,7 @@ class BlueskySource:
         self._access: str | None = None
         self._refresh: str | None = None
         self._roster_res: list[re.Pattern] | None = None
-        self._roster_key: tuple[str, ...] = ()
+        self._roster_key: tuple = ()
 
     async def fetch(self) -> list[Update]:
         if not (self.username and self.password):
@@ -155,10 +155,16 @@ class BlueskySource:
 
     # --- relevance --------------------------------------------------------------
     def _roster_patterns(self) -> list[re.Pattern]:
-        key = tuple(self.roster.names)
+        """Word-boundary patterns for every canonical name AND every nickname,
+        so a Bluesky post that only says "Rick", "Lala", or "Salina" still
+        clears the relevance gate instead of being dropped before extraction.
+        Cache key includes nicknames so runtime /addnickname recompiles it."""
+        names = self.roster.names
+        nicks = sorted(self.roster.nicknames.keys())
+        key = (tuple(names), tuple(nicks))
         if self._roster_res is None or key != self._roster_key:
-            self._roster_res = [re.compile(rf"\b{re.escape(n)}\b", re.IGNORECASE)
-                                for n in self.roster.names]
+            self._roster_res = [re.compile(rf"\b{re.escape(t)}\b", re.IGNORECASE)
+                                for t in list(names) + nicks]
             self._roster_key = key
         return self._roster_res
 

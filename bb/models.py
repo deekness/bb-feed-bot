@@ -35,6 +35,7 @@ class AllianceProposal:
     confidence: float      # 0..1
     evidence: str
     name: str | None = None
+    one_sided: bool = False  # A believes in it but B is playing them (or vice-versa)
     source_hash: str = ""  # content_hash of the update the evidence came from
 
 
@@ -43,6 +44,7 @@ class RelationshipChange:
     houseguests: list[str]  # exactly two, canonical
     kind: str               # allied | conflict | betrayal | showmance_start | showmance_end
     evidence: str
+    source_hash: str = ""
 
 
 @dataclass(slots=True)
@@ -60,6 +62,7 @@ class VotePlan:
     target: str             # who they plan to vote to EVICT
     confidence: float
     evidence: str
+    firmness: str = "leaning"  # locked | leaning | unsure
     source_hash: str = ""
 
 
