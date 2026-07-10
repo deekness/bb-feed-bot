@@ -378,6 +378,21 @@ class BBBot(commands.Bot):
         embed.set_footer(text=f"via @{self.feedstate.handle}")
         await channel.send(embed=embed)
 
+    async def _feeds_are_live(self) -> bool:
+        """False when hard game facts must NOT be written:
+          * an admin has paused writes (bot_kv 'live_writes_paused' = true) —
+            used pre-premiere when feeds are off and everything is rumor, or
+          * the feed-state monitor positively reports feeds down (anipals/WBRB),
+            i.e. a comp or ceremony is happening and rumors are flying.
+        An UNKNOWN feed state does NOT suppress (the upstream monitor may just
+        not be running), so normal tracking is never silently disabled."""
+        if await self.db.kv_get("live_writes_paused"):
+            return False
+        fs = await self.db.kv_get("feed_state") or {}
+        if fs.get("state") in (STATE_ANIPALS, STATE_WBRB):
+            return False
+        return True
+
     def is_admin(self, interaction: discord.Interaction) -> bool:
         if self.settings.owner_id and interaction.user.id == self.settings.owner_id:
             return True
@@ -526,9 +541,18 @@ class BBBot(commands.Bot):
                         if hash_src.get(v.source_hash) != "bluesky"]
                 await self.alliances.ingest(extraction.alliances)
                 await self.relationships.ingest(extraction.relationships)
-                await self.game_state.ingest(extraction.game_events)
-                await self.votes.ingest(extraction.vote_plans,
-                                        self.game_state.current_week())
+                # Hard facts (HOH/noms/eviction, vote plans) require a LIVE feed.
+                # While feeds are off (pre-premiere) or down (comp/ceremony
+                # anipals+WBRB), the wild is all TV announcements and rumor —
+                # e.g. "Dee won HOH" before it airs — so game state and votes
+                # are not written. Alliances/relationships still track.
+                if await self._feeds_are_live():
+                    await self.game_state.ingest(extraction.game_events)
+                    await self.votes.ingest(extraction.vote_plans,
+                                            self.game_state.current_week())
+                elif extraction.game_events or extraction.vote_plans:
+                    log.info("feeds not live — held %d game events, %d vote plans",
+                             len(extraction.game_events), len(extraction.vote_plans))
 
             # Keep a small rolling window for the next extraction's context.
             self._recent_for_context = (self._recent_for_context + new_updates)[-10:]

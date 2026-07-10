@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds (+ /zing in zings.py)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /setgamestate, /removegamestate, /setchannel, /status,
+        /rejectalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /status,
         /testdm
 Owner:  /sync
 
@@ -417,6 +417,31 @@ class BBCommands(commands.Cog):
         await interaction.response.send_message(
             f"{'🗑️ Rejected' if ok else '❌ Not found'}: alliance #{alliance_id}", ephemeral=True)
 
+    @app_commands.command(name="livewrites",
+                          description="(Admin) Pause/resume game-state & vote recording (use while feeds are off).")
+    @app_commands.describe(state="'paused' = don't record HOH/noms/evictions/votes (pre-feeds or outage); 'live' = normal")
+    @app_commands.choices(state=[
+        app_commands.Choice(name="paused (feeds off — hold facts & rumors)", value="paused"),
+        app_commands.Choice(name="live (feeds on — record normally)", value="live"),
+    ])
+    async def livewrites(self, interaction: discord.Interaction,
+                         state: app_commands.Choice[str]):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        paused = state.value == "paused"
+        await self.bot.db.kv_set("live_writes_paused", paused)
+        if paused:
+            msg = ("⏸️ **Game-state & vote recording paused.** HOH, nominations, "
+                   "evictions, and vote plans will NOT be written while feeds are "
+                   "off — rumors like an unaired HOH win are ignored. Alliances and "
+                   "relationships still track. Run `/livewrites live` once feeds "
+                   "are live.")
+        else:
+            msg = ("▶️ **Game-state & vote recording resumed.** Live feed facts will "
+                   "be recorded normally again.")
+        await interaction.response.send_message(msg, ephemeral=True)
+
     @app_commands.command(name="setgamestate", description="(Admin) Record a game-state fact (fix a miss).")
     @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee",
                            houseguest="Houseguest name", week="Week number (default: current)")
@@ -514,6 +539,15 @@ class BBCommands(commands.Cog):
         if ep:
             clock += " · 📺 episode window" + (" (LIVE)" if ep.get("live") else "")
         embed.add_field(name="Clock", value=clock, inline=True)
+        paused = await self.bot.db.kv_get("live_writes_paused")
+        fs = (await self.bot.db.kv_get("feed_state") or {}).get("state")
+        if paused:
+            writes = "⏸️ paused (feeds off)"
+        elif fs in ("anipals", "wbrb"):
+            writes = f"⏸️ auto-held (feeds {fs})"
+        else:
+            writes = "▶️ live"
+        embed.add_field(name="Game/vote writes", value=writes, inline=True)
         await interaction.response.send_message(embed=embed, ephemeral=True)
 
     # --- owner --------------------------------------------------------------
