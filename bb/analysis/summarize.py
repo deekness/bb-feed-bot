@@ -35,13 +35,29 @@ _IMPORTANCE = {
     1: ("strategy", "talk", "conversation"),
 }
 
+# Candidate triggers ONLY — a keyword match merely sends the update to the LLM
+# gate below, which decides if it is a real, COMPLETED event. Strategy words
+# ("backdoor", "target", "blindside") are deliberately NOT here: houseguests
+# discuss them constantly, and discussion is not news.
 URGENT_KEYWORDS = (
-    "evicted", "eviction", "wins hoh", "won hoh", "wins veto", "won veto",
-    "wins the veto", "self-evict", "self-evicted", "expelled", "ejected",
-    "quit the game", "walked out", "removed from the house", "removed from the game",
-    "backdoor", "backdoored", "blindside", "blindsided", "medical",
-    "returns to the house", "re-enters", "battle back", "double eviction",
-    "triple eviction", "diamond veto", "coup", "pandora",
+    # comp results
+    "wins hoh", "won hoh", "wins the hoh", "is the new hoh", "new hoh",
+    "wins veto", "won veto", "wins the veto", "won the veto", "wins pov",
+    "won pov", "wins the pov",
+    # ceremony outcomes
+    "nomination ceremony", "veto ceremony", "veto meeting", "has been nominated",
+    "nominated for eviction", "final nominees", "veto was used", "used the veto",
+    "did not use the veto", "vetoed", "replacement nominee",
+    # exits
+    "evicted", "eviction results", "has been evicted", "self-evict",
+    "self-evicted", "expelled", "ejected", "walked out", "quit the game",
+    "removed from the house", "removed from the game",
+    # rare big twists
+    "battle back", "returns to the house", "re-enters", "double eviction",
+    "triple eviction", "diamond veto", "coup",
+    # blowups
+    "screaming match", "blowup", "blow up", "shouting match", "fight broke out",
+    "got into it", "yelling at", "screaming at", "in tears", "stormed off",
 )
 
 _NEUTRALITY = (
@@ -111,13 +127,23 @@ def importance(update: Update) -> int:
     return min(score, 5)
 
 
+_URGENT_RES = tuple(
+    (k, re.compile(rf"\b{re.escape(k)}\b", re.IGNORECASE)) for k in URGENT_KEYWORDS
+)
+
+
 def urgent_keyword(update: Update) -> str | None:
-    """The first urgent keyword present in the update, or None. The keyword
-    itself is used by the caller as a cooldown key so one real-world event
-    reported by multiple sources fires one Breaking post, not several."""
-    text = update.text.lower()
-    for k in URGENT_KEYWORDS:
-        if k in text:
+    """The first urgent keyword present in the update, or None. Word-boundary
+    matched — a plain substring test made "coup" fire inside "couple" and lit up
+    Breaking on ordinary chatter. The keyword only NOMINATES a candidate; the
+    LLM gate in Summarizer.breaking() makes the real call.
+
+    Also used as the cooldown key so one real event reported by several sources
+    fires a single Breaking post.
+    """
+    text = update.text
+    for k, rx in _URGENT_RES:
+        if rx.search(text):
             return k
     return None
 
@@ -159,6 +185,42 @@ class Summarizer:
             if embed:
                 return embed
         return self._pattern_whats_happening(top[:5], len(updates))
+
+    # --- breaking alert (LLM-gated; discussion must NOT fire) ---------------
+    async def breaking(self, update: Update, house_context: str = "") -> str | None:
+        """Decide whether an update is REALLY breaking, and if so write the
+        one-line alert. Returns None to suppress.
+
+        The keyword list only nominates candidates; this is the actual gate.
+        Houseguests talk about the veto, backdoors and targets constantly —
+        that is conversation, not news. Only a COMPLETED, confirmed event
+        (comp result, ceremony outcome, exit, major blowup) is breaking.
+        """
+        if not self.llm.available:
+            return None  # no LLM: stay silent rather than dump raw updater text
+        system = (
+            _NEUTRALITY +
+            " You are triaging a Big Brother live-feed update for a BREAKING "
+            "alert. Reply with EXACTLY one of:\n"
+            "SKIP — if it is houseguests DISCUSSING, planning, speculating about, "
+            "or reacting to something; a joke; general chatter; or anything not "
+            "yet decided. Discussion of a veto/backdoor/target is NOT breaking.\n"
+            "ALERT: <one clean sentence> — ONLY if a real event has ACTUALLY "
+            "HAPPENED: a competition was won, a ceremony concluded, someone was "
+            "nominated/evicted/removed/walked, a major twist occurred, or a "
+            "serious fight/blowup broke out.\n"
+            "The sentence must be plain, factual, and self-contained. Do not "
+            "copy the updater's shorthand, timestamps, or tags like (NT)."
+        )
+        user = f"{self._ctx(house_context)}UPDATE:\n{update.text}"
+        text = await self.llm.text(system, user, max_tokens=120)
+        if not text:
+            return None
+        text = strip_links(text).strip()
+        if not text.upper().startswith("ALERT"):
+            return None
+        line = text.split(":", 1)[1].strip() if ":" in text else ""
+        return sentence_clamp(line, 400) or None
 
     # --- episode recap (grouped digest of an aired episode's chatter) -------
     async def episode_recap(self, updates: list[Update], label: str,

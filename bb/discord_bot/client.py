@@ -576,27 +576,31 @@ class BBBot(commands.Bot):
                 for u in new_updates:
                     if recap_airing and u.source == "bluesky":
                         continue
+                    # Stage 1 (cheap): keyword NOMINATES a candidate. It does not
+                    # decide — houseguests say "veto"/"backdoor" all day long.
                     kw = urgent_keyword(u)
                     if not kw:
                         continue
                     names = _names_in(u.text, self.roster.names)
                     # Bluesky urgency must reference an actual houseguest —
                     # kills "who wins HOH tonight??" speculation triggers.
-                    # Jokers RSS is feeds-only and stays trusted as-is.
                     if u.source == "bluesky" and not self.roster.is_empty and not names:
                         continue
-                    # Same event via two sources = different wording = different
-                    # hashes, so dedup can't collapse it. Cooldown keyed on
-                    # (keyword + names) means one eviction fires one 🚨 while a
-                    # double-eviction (different names) still fires twice.
+                    # Stage 2 (cheap): cooldown BEFORE the LLM, so a burst of
+                    # chatter about one event can't run up the bill.
                     key = f"{kw}|{','.join(names)}"
                     now_mono = time.monotonic()
                     if now_mono - self._breaking_last.get(key, float("-inf")) < self.BREAKING_COOLDOWN_S:
                         continue
+                    # Stage 3 (LLM): the real gate. Returns None for discussion,
+                    # planning, jokes and speculation; a clean one-liner only for
+                    # an event that actually HAPPENED.
+                    line = await self.summarizer.breaking(u, await self.house_context())
+                    if not line:
+                        continue
                     self._breaking_last[key] = now_mono
-                    desc = sentence_clamp(strip_links(u.text), 1400)
                     await channel.send(embed=discord.Embed(
-                        title="🚨 Breaking", description=desc,
+                        title="🚨 Breaking", description=line,
                         color=0xE74C3C, timestamp=dt.datetime.now(self.tz)))
 
             if self.llm.available and not self.roster.is_empty:
