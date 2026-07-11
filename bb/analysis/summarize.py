@@ -86,6 +86,32 @@ def strip_links(text: str) -> str:
     return re.sub(r"[ \t]{2,}", " ", text).strip()
 
 
+def drop_orphan_tail(text: str) -> str:
+    """Remove a trailing fragment the MODEL left unfinished (token limit hit
+    mid-write), e.g. a dangling '- Rome and Lala' or a lone '- Y'. A final line
+    is dropped when it is a bullet with no sentence-ending punctuation and is
+    either very short or clearly cut off. Never touches a completed line."""
+    lines = text.rstrip().split("\n")
+    while lines:
+        last = lines[-1].strip()
+        if not last:
+            lines.pop()
+            continue
+        is_bullet = last.startswith(("-", "•", "*"))
+        body = last.lstrip("-•* ").strip()
+        finished = body.endswith((".", "!", "?", '"', "”", ")"))
+        # a bold header left dangling at the end is also an orphan
+        is_header = body.startswith("**") and body.endswith("**")
+        if is_bullet and not finished and (len(body) < 45 or not body.endswith((".",))):
+            lines.pop()
+            continue
+        if is_header:
+            lines.pop()
+            continue
+        break
+    return "\n".join(lines).rstrip()
+
+
 def sentence_clamp(text: str, limit: int) -> str:
     """Fit text into `limit` chars without ever cutting mid-sentence. Prefers
     the last sentence boundary before the limit; falls back to the last
@@ -153,9 +179,27 @@ def is_urgent(update: Update) -> bool:
 
 
 class Summarizer:
-    def __init__(self, llm: LLM, tz):
+    def __init__(self, llm: LLM, tz, roster=None):
         self.llm = llm
         self.tz = tz
+        # The roster lets prompts state the canonical cast + aliases. Updaters
+        # write "Rick" and "Devens" (and "Lala"/"LaTrice") interchangeably —
+        # without this the model reports one person as two.
+        self.roster = roster
+
+    def _naming_rule(self) -> str:
+        if not self.roster or self.roster.is_empty:
+            return ""
+        cast = ", ".join(sorted(self.roster.names))
+        rule = (f"The houseguests are: {cast}. Refer to each ONLY by these exact "
+                "names. Never invent houseguests.")
+        nicks = self.roster.nicknames
+        if nicks:
+            pairs = "; ".join(f"'{k}' = {v}" for k, v in sorted(nicks.items()))
+            rule += (f" These are aliases for the SAME person, not different people: "
+                     f"{pairs}. Always use the canonical name and never treat an "
+                     "alias and its canonical name as two separate houseguests.")
+        return rule + " "
 
     # --- hourly digest ------------------------------------------------------
     async def hourly(self, updates: list[Update], hour_label: str,
@@ -233,7 +277,7 @@ class Summarizer:
             return None
         body = "\n".join(f"- {u.text}"
                           for u in sorted(updates, key=lambda u: u.published_at))
-        system = _NEUTRALITY + " Be concise."
+        system = _NEUTRALITY + " " + self._naming_rule() + "Be concise."
         user = (
             f"{self._ctx(house_context)}"
             f"Below are feed updates and viewer posts from during and just after "
@@ -255,7 +299,7 @@ class Summarizer:
             return None
         embed = discord.Embed(
             title=f"📺 Episode Recap — {label}",
-            description=sentence_clamp(strip_links(text), 4000),
+            description=sentence_clamp(drop_orphan_tail(strip_links(text)), 4000),
             color=0xF1C40F, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"{len(updates)} updates during & after the episode")
@@ -294,7 +338,7 @@ class Summarizer:
             "Cover the whole day — do not drop threads that only appear in one "
             f"hour.\n\nHOURLY SUMMARIES:\n\n{body}"
         )
-        text = await self.llm.text(system, user, max_tokens=1000, temperature=0.4, heavy=True)
+        text = await self.llm.text(system, user, max_tokens=1000, heavy=True)
         if not text:
             embed = await self.whats_happening(fallback_updates, house_context)
             embed.title = f"Day {day_number} Recap"
@@ -336,7 +380,7 @@ class Summarizer:
             "Stay neutral toward every houseguest. 2-6 sentences or a short list.")
 
         text = await self.llm.text(_NEUTRALITY, "\n\n".join(parts),
-                                   max_tokens=800, temperature=0.3)
+                                   max_tokens=800)
         embed = discord.Embed(
             title=f"❓ {question[:230]}",
             description=sentence_clamp(strip_links(text), 4000) if text else "Couldn't produce an answer — try rewording.",
@@ -372,7 +416,7 @@ class Summarizer:
             "2. 5-8 bullets of key developments, chronological.\n"
             f"3. One line on where things stand going into next week.\n\nDAILY RECAPS:\n\n{blocks}"
         )
-        text = await self.llm.text(_NEUTRALITY, user, max_tokens=1200, temperature=0.4, heavy=True)
+        text = await self.llm.text(_NEUTRALITY, user, max_tokens=1200, heavy=True)
         embed = discord.Embed(
             title=f"📆 Week {week_number} Recap",
             description=sentence_clamp(strip_links(text), 4000) if text else "Recap generation failed.",
@@ -385,7 +429,7 @@ class Summarizer:
     async def _llm_digest(self, updates: list[Update], hour_label: str,
                           house_context: str) -> discord.Embed | None:
         body = "\n".join(f"- {u.text}" for u in sorted(updates, key=lambda u: u.published_at))
-        system = _NEUTRALITY + " Be concise."
+        system = _NEUTRALITY + " " + self._naming_rule() + "Be concise."
         user = (
             f"{self._ctx(house_context)}"
             f"Summarize what happened this hour ({hour_label}) in the Big Brother "
@@ -401,12 +445,12 @@ class Summarizer:
             "- No intro or closing paragraph — start straight at the first header.\n\n"
             f"UPDATES:\n{body}"
         )
-        text = await self.llm.text(system, user, max_tokens=700)
+        text = await self.llm.text(system, user, max_tokens=1600)
         if not text:
             return None
         embed = discord.Embed(
             title=f"House Summary — {hour_label}",
-            description=sentence_clamp(strip_links(text), 4000),
+            description=sentence_clamp(drop_orphan_tail(strip_links(text)), 4000),
             color=0x5865F2, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"{len(updates)} updates this hour")
@@ -422,7 +466,7 @@ class Summarizer:
             "as short bullet points (one sentence each), then a one-line overall "
             f"summary. Updates:\n\n{body}"
         )
-        text = await self.llm.text(system, user, max_tokens=800, temperature=0.4)
+        text = await self.llm.text(system, user, max_tokens=800)
         if not text:
             return None
         embed = discord.Embed(
