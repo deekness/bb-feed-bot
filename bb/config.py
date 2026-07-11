@@ -49,6 +49,7 @@ class Season:
     nicknames: dict[str, str]
     bluesky_accounts: list[str]
     bb_keywords: list[str]
+    rss_fallback_urls: list[str] = field(default_factory=list)
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -67,6 +68,7 @@ class Season:
             name=data.get("season_name", f"Big Brother {data['season_number']}"),
             start_date=date.fromisoformat(str(data["season_start_date"])),
             rss_url=data["rss_url"],
+            rss_fallback_urls=list(data.get("rss_fallback_urls") or []),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],

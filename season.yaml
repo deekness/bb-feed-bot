@@ -13,6 +13,12 @@ season_start_date: "2026-07-09"
 # Live-feed updates RSS feed (Jokers Updates).
 rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 
+# Tried in order if the primary refuses the connection. The rss.* host has been
+# seen to drop TCP connections from Railway while the site itself is up.
+rss_fallback_urls:
+  - "https://forums.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
+  - "https://www.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
+
 # ----------------------------------------------------------------------------
 # ROSTER — the heart of the system.
 # Houseguest/alliance extraction is GROUNDED in this list: anything that does
@@ -66,8 +72,6 @@ bluesky_accounts:
   - bbnutters.bsky.social
   - rbbq.bsky.social
   - bigbroaccess.bsky.social
-  - thebbpresident.bsky.social
-  - autumnupdates.bsky.social
 
 # Generic, season-agnostic keywords that mark a post as BB-related.
 # (Roster names are also treated as relevance signals automatically.)

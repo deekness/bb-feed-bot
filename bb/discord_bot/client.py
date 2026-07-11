@@ -94,7 +94,9 @@ class BBBot(commands.Bot):
                        recap_model=settings.llm_model_recap)
         self.roster = Roster.from_season(season)
 
-        sources = [RSSSource(season.rss_url),
+        self.rss_source = RSSSource(season.rss_url,
+                                    fallback_urls=season.rss_fallback_urls)
+        sources = [self.rss_source,
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
         self.pipeline = IngestPipeline(self.db, sources)
@@ -289,6 +291,32 @@ class BBBot(commands.Bot):
                 timestamp=now))
         except Exception as e:
             log.error("feed stall check failed: %s", e)
+
+    async def _check_source_health(self, now: dt.datetime) -> None:
+        """DM the admin when a SINGLE source is dead but the others still work.
+        The existing stall check only fires when NOTHING is arriving, so a
+        totally dead RSS feed could (and did) go unnoticed for hours while
+        Bluesky trickled along."""
+        if not self._in_season():
+            return
+        fails = getattr(self.rss_source, "consecutive_failures", 0)
+        if fails < 15:          # ~30 min of 2-minute polls
+            return
+        today = now.date().isoformat()
+        if await self.db.kv_get("nudge_rss_date") == today:
+            return
+        embed = discord.Embed(
+            title="⚠️ Jokers RSS feed is down",
+            description=(f"The RSS source has failed **{fails} polls in a row** "
+                         "(~30+ min). Bluesky may still be working, so summaries "
+                         "will keep posting — but they're missing the richest "
+                         "source of house updates.\n\n"
+                         "Check the Railway logs for the exact error. If the host "
+                         "is refusing connections, add a working mirror under "
+                         "`rss_fallback_urls` in season.yaml."),
+            color=0xE67E22)
+        if await self._send_admin_dm(embed):
+            await self.db.kv_set("nudge_rss_date", today)
 
     async def _check_llm_health(self, now: dt.datetime) -> None:
         """DM the admin when summaries have silently degraded to raw lists —
@@ -669,6 +697,7 @@ class BBBot(commands.Bot):
                 await self._summarize_hour(w_start, w_end, post=(w_end == hour_end))
             await self.db.kv_set("last_hourly_end", hour_end.isoformat())
             await self._check_llm_health(now)
+            await self._check_source_health(now)
 
             await self._check_feed_stall(now)
         except Exception as e:

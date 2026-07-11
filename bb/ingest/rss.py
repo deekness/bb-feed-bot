@@ -27,21 +27,52 @@ def _clean_html(text: str) -> str:
     return _WS.sub(" ", text).strip()
 
 
+# Some hosts refuse connections from datacenter IPs or from clients with no
+# User-Agent. Present as a normal browser.
+_UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
+       "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+
+
 class RSSSource:
     name = "rss"
 
-    def __init__(self, url: str, timeout: int = 20):
-        self.url = url
+    def __init__(self, url: str, timeout: int = 20,
+                 fallback_urls: list[str] | None = None):
+        # Candidate feed URLs, tried in order. The primary host has been seen to
+        # refuse TCP connections from Railway while the site itself is up, so a
+        # mirror/alternate path keeps the richest source alive.
+        self.urls = [url] + list(fallback_urls or [])
         self.timeout = timeout
+        self.consecutive_failures = 0   # read by the bot for source-health alerts
+        self._active_url = url
 
     async def fetch(self) -> list[Update]:
-        try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(self.url, timeout=self.timeout) as resp:
-                    raw = await resp.read()
-        except Exception as e:
-            log.error("RSS fetch failed: %s", e)
+        raw = None
+        errors: list[str] = []
+        async with aiohttp.ClientSession(headers={"User-Agent": _UA}) as session:
+            # Try the URL that worked last time first, then the rest.
+            ordered = ([self._active_url] +
+                       [u for u in self.urls if u != self._active_url])
+            for url in ordered:
+                try:
+                    async with session.get(url, timeout=self.timeout) as resp:
+                        if resp.status != 200:
+                            errors.append(f"{url} -> HTTP {resp.status}")
+                            continue
+                        raw = await resp.read()
+                    if self._active_url != url:
+                        log.info("RSS switched to working URL: %s", url)
+                        self._active_url = url
+                    break
+                except Exception as e:
+                    errors.append(f"{url} -> {e}")
+
+        if raw is None:
+            self.consecutive_failures += 1
+            log.error("RSS fetch failed (%d in a row): %s",
+                      self.consecutive_failures, "; ".join(errors))
             return []
+        self.consecutive_failures = 0
 
         feed = feedparser.parse(raw)
         updates: list[Update] = []

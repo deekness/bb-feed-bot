@@ -8,6 +8,10 @@ Session handling: createSession is heavily rate-limited by Bluesky
 (30/5min, 300/day — a 2-minute poll would burn 720/day). So we create a
 session ONCE, reuse the access token, refresh it via refreshSession when it
 expires, and only fall back to a fresh createSession if the refresh fails.
+
+GOTCHA: an expired access token comes back as HTTP **400** with an error body
+of ExpiredToken — not 401. Access tokens last ~2 hours, so mishandling this
+silently kills every feed two hours after startup.
 """
 from __future__ import annotations
 
@@ -118,8 +122,22 @@ class BlueskySource:
             params={"actor": handle, "limit": 25, "filter": "posts_no_replies"},
             headers=headers, timeout=15,
         ) as resp:
-            if resp.status == 401 and not retried:
-                # Access token expired: refresh (or re-auth) once and retry.
+            # AT Protocol signals an expired access token with HTTP 400 and an
+            # error body of ExpiredToken/InvalidToken — NOT 401. Only handling
+            # 401 meant every feed 400'd forever once the ~2h token lapsed, and
+            # the refreshSession path below was never reached.
+            expired = resp.status == 401
+            if resp.status == 400:
+                try:
+                    err = (await resp.json()).get("error", "")
+                except Exception:
+                    err = ""
+                expired = err in ("ExpiredToken", "InvalidToken", "AuthMissing")
+                if not expired:
+                    log.warning("Bluesky feed %s: HTTP 400 (%s)", handle, err or "?")
+                    return []
+            if expired and not retried:
+                log.info("Bluesky token expired — refreshing session")
                 self._access = None
                 if await self._ensure_session(session):
                     return await self._fetch_account(session, handle, retried=True)
