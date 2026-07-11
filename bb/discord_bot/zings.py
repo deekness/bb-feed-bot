@@ -1,6 +1,13 @@
 """Zingbot — a comedic roast command for the server.
 
-`/zing` roasts a specific member, or (with no target) a random human victim.
+`/zing` roasts a Discord member, a HOUSEGUEST (roster-backed autocomplete), or —
+with nothing specified — a random human victim.
+
+Houseguest zings are game-aware: the real Zingbot roasts hamsters about what they
+actually did in the house, so when the LLM is available we generate a zing from
+the tracked house state (comp results, noms, showmances, alliances). It roasts
+GAMEPLAY only — never appearance or protected characteristics — and falls back to
+the generic templates if the LLM is unavailable.
 
 Every roast is capped with a randomly chosen ZING! sign-off in the style of
 Big Brother's Zingbot, so each one lands like the real thing and the ending
@@ -206,6 +213,25 @@ ROASTS = [
 ]
 
 
+# Zingbot's register when roasting a real houseguest: their GAME, not their person.
+_ZING_SYSTEM = (
+    "You are Zingbot 3000 from Big Brother: a cheesy, cornball robot comedian who "
+    "roasts houseguests on the live feeds. Write ONE short zing (1-2 sentences) "
+    "about the named houseguest, in Zingbot's punchy setup-then-punchline style.\n"
+    "RULES:\n"
+    "- Roast their GAMEPLAY and house behavior only: comp losses, bad reads, "
+    "nominations, showmances, paranoia, alliances, promises they broke.\n"
+    "- Use the HOUSE STATE below for material so the zing lands on something real. "
+    "If there is little to go on, roast them generically rather than inventing "
+    "events that did not happen.\n"
+    "- NEVER mock appearance, body, intelligence, race, gender, orientation, "
+    "religion, disability, or anything outside the game. No cruelty — this is "
+    "affectionate TV-show ribbing, PG-13.\n"
+    "- Do NOT add a ZING! sign-off; that gets appended for you.\n"
+    "- Output the zing text only."
+)
+
+
 class ZingCog(commands.Cog):
     def __init__(self, bot):
         self.bot = bot
@@ -218,17 +244,71 @@ class ZingCog(commands.Cog):
         roast = ROASTS[self._bag.pop()].format(name=name)
         return f"{roast}  {random.choice(ZING_SIGNOFFS)}"
 
+    async def _houseguest_line(self, name: str) -> str:
+        """Game-aware zing from tracked house state; generic template if no LLM."""
+        llm = getattr(self.bot, "llm", None)
+        if not (llm and llm.available):
+            return self._next_line(name)
+        try:
+            context = await self.bot.house_context()
+            user = (f"HOUSE STATE: {context}\n\n" if context else "") + \
+                   f"Zing this houseguest: {name}"
+            text = await llm.text(_ZING_SYSTEM, user, max_tokens=150)
+        except Exception:
+            text = None
+        if not text:
+            return self._next_line(name)
+        return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
+
+    async def houseguest_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> list[app_commands.Choice[str]]:
+        names = getattr(self.bot.roster, "names", [])
+        cur = current.lower()
+        return [app_commands.Choice(name=n, value=n)
+                for n in sorted(names) if cur in n.lower()][:25]
+
     @app_commands.command(
         name="zing",
-        description="Let Zingbot roast someone. Pick a target, or leave it blank for a random victim.",
+        description="Let Zingbot roast someone — a server member, a houseguest, or a random victim.",
     )
-    @app_commands.describe(target="Who to roast. Leave empty and Zingbot picks a random victim.")
-    async def zing(self, interaction: discord.Interaction, target: Optional[discord.Member] = None):
+    @app_commands.describe(
+        target="A Discord member to roast.",
+        houseguest="A Big Brother houseguest to roast (game-aware zing).",
+    )
+    @app_commands.autocomplete(houseguest=houseguest_autocomplete)
+    async def zing(self, interaction: discord.Interaction,
+                   target: Optional[discord.Member] = None,
+                   houseguest: Optional[str] = None):
         if interaction.guild is None:
             await interaction.response.send_message(
                 "Zingbot only works inside a server.", ephemeral=True)
             return
+        if target and houseguest:
+            await interaction.response.send_message(
+                "Pick one victim at a time — a member *or* a houseguest.", ephemeral=True)
+            return
 
+        # --- houseguest zing (roster-gated, LLM-written when possible) ---
+        if houseguest:
+            canon = self.bot.roster.resolve(houseguest)
+            if not canon:
+                await interaction.response.send_message(
+                    f"'{houseguest}' isn't on the roster. Try the autocomplete.",
+                    ephemeral=True)
+                return
+            await interaction.response.defer()   # LLM call can take a couple seconds
+            line = await self._houseguest_line(canon)
+            embed = discord.Embed(
+                title="🤖  ZINGBOT",
+                description=f"**{canon}**\n\n{line}",
+                color=0xE91E63,
+            )
+            embed.set_footer(text="🤖 beep boop — get zinged")
+            await interaction.followup.send(embed=embed)
+            return
+
+        # --- member zing (unchanged behavior) ---
         if target is None:
             humans = [m for m in interaction.guild.members if not m.bot]
             if not humans:
