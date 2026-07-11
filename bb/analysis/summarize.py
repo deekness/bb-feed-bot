@@ -375,12 +375,24 @@ class Summarizer:
             parts.append(f"FEED UPDATES MATCHING THE QUESTION (newest first):\n{found}")
         parts.append(
             f"QUESTION: {question}\n\n"
-            "Answer using only the material above. Be specific about who/when. "
-            "If the archive doesn't fully answer it, say what is and isn't known. "
-            "Stay neutral toward every houseguest. 2-6 sentences or a short list.")
+            "Answer using ONLY the material above — verify it against the "
+            "updates before answering, but do NOT narrate that process.\n"
+            "STYLE — give the answer, not the search:\n"
+            "- Lead with the direct answer in the first sentence. No preamble.\n"
+            "- Never cite where it came from: no 'per the feed update', no "
+            "'according to', no update timestamps, no 'the archive shows'. "
+            "Mention a time ONLY when the timing is itself the answer.\n"
+            "- Don't editorialize about the sources: no corrections, edits, "
+            "post counts, or 'nothing further has surfaced yet'.\n"
+            "- Be brief: 1-3 sentences, or a short list when the answer is "
+            "several names.\n"
+            "- If the answer genuinely isn't in the material, say so in one "
+            "short sentence — don't pad it. If something is unconfirmed, say "
+            "so in a few words, not a paragraph.\n"
+            "Stay neutral toward every houseguest.")
 
         text = await self.llm.text(_NEUTRALITY, "\n\n".join(parts),
-                                   max_tokens=800)
+                                   max_tokens=500)
         embed = discord.Embed(
             title=f"❓ {question[:230]}",
             description=(sentence_clamp(drop_orphan_tail(strip_links(text)), 4000)
