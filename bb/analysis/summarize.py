@@ -338,14 +338,14 @@ class Summarizer:
             "Cover the whole day — do not drop threads that only appear in one "
             f"hour.\n\nHOURLY SUMMARIES:\n\n{body}"
         )
-        text = await self.llm.text(system, user, max_tokens=1000, heavy=True)
+        text = await self.llm.text(system, user, max_tokens=2500, heavy=True)
         if not text:
             embed = await self.whats_happening(fallback_updates, house_context)
             embed.title = f"Day {day_number} Recap"
             return embed
         embed = discord.Embed(
             title=f"Day {day_number} Recap",
-            description=sentence_clamp(strip_links(text), 4000), color=0xFF6B35, timestamp=datetime.now(self.tz),
+            description=sentence_clamp(drop_orphan_tail(strip_links(text)), 4000), color=0xFF6B35, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Built from {len(hourly_summaries)} hourly summaries • {total} updates")
         return embed
@@ -383,7 +383,8 @@ class Summarizer:
                                    max_tokens=800)
         embed = discord.Embed(
             title=f"❓ {question[:230]}",
-            description=sentence_clamp(strip_links(text), 4000) if text else "Couldn't produce an answer — try rewording.",
+            description=(sentence_clamp(drop_orphan_tail(strip_links(text)), 4000)
+                         if text else "Couldn't produce an answer — try rewording."),
             color=0x1ABC9C, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Searched archive: {len(matches)} matching updates")
@@ -416,10 +417,11 @@ class Summarizer:
             "2. 5-8 bullets of key developments, chronological.\n"
             f"3. One line on where things stand going into next week.\n\nDAILY RECAPS:\n\n{blocks}"
         )
-        text = await self.llm.text(_NEUTRALITY, user, max_tokens=1200, heavy=True)
+        text = await self.llm.text(_NEUTRALITY, user, max_tokens=2500, heavy=True)
         embed = discord.Embed(
             title=f"📆 Week {week_number} Recap",
-            description=sentence_clamp(strip_links(text), 4000) if text else "Recap generation failed.",
+            description=(sentence_clamp(drop_orphan_tail(strip_links(text)), 4000)
+                         if text else "Recap generation failed."),
             color=0x8E44AD, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Built from {len(dailies)} daily recaps")
@@ -466,12 +468,12 @@ class Summarizer:
             "as short bullet points (one sentence each), then a one-line overall "
             f"summary. Updates:\n\n{body}"
         )
-        text = await self.llm.text(system, user, max_tokens=800)
+        text = await self.llm.text(system, user, max_tokens=1200)
         if not text:
             return None
         embed = discord.Embed(
             title="What's happening right now",
-            description=sentence_clamp(strip_links(text), 4000),
+            description=sentence_clamp(drop_orphan_tail(strip_links(text)), 4000),
             color=0xFF6B35, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"Based on {total} updates in the last 24h")
