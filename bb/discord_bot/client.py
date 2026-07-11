@@ -725,13 +725,13 @@ class BBBot(commands.Bot):
 
     @tasks.loop(minutes=15)
     async def daily_loop(self) -> None:
-        """Fires on the first tick at/after 08:00 Pacific (Big Brother house
+        """Fires on the first tick at/after 07:00 Pacific (Big Brother house
         time) and recaps the PREVIOUS house day. Markers live in bot_kv, so a
         restart can neither double-post a recap nor permanently skip a day the
-        bot was down for at 8am."""
+        bot was down for at 7am."""
         try:
             now_house = dt.datetime.now(self.house_tz)
-            if now_house.hour < 8:
+            if now_house.hour < 7:
                 return
             today_house = now_house.date()
             if await self.db.kv_get("last_daily_date") == today_house.isoformat():
@@ -753,7 +753,7 @@ class BBBot(commands.Bot):
                 return
 
             # Recap the previous house day: midnight -> midnight Pacific of
-            # yesterday, titled with THAT day's house-day number (e.g. an 8am
+            # yesterday, titled with THAT day's house-day number (e.g. a 7am
             # recap on Day 2 covers and is titled "Day 1").
             yesterday_house = today_house - dt.timedelta(days=1)
             day_number = self.game_state.current_day(yesterday_house)
