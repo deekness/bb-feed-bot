@@ -11,11 +11,37 @@ Design choices that fix old-bot pain:
 from __future__ import annotations
 
 import logging
+import re
 from datetime import datetime
 
 import asyncpg
 
 from .models import Update
+
+_WORD = re.compile(r"[A-Za-z0-9]+")
+# Question scaffolding carries no search signal; Postgres strips true English
+# stop-words itself, but these interrogatives would otherwise become useless
+# OR-terms that match half the archive.
+_QUESTION_WORDS = {
+    "who", "what", "when", "where", "why", "how", "which", "whose", "whom",
+    "is", "are", "was", "were", "be", "been", "am", "do", "does", "did",
+    "has", "have", "had", "can", "could", "will", "would", "should",
+    "the", "a", "an", "of", "in", "on", "at", "to", "for", "and", "or",
+    "with", "about", "from", "by", "as", "it", "its", "this", "that",
+    "there", "their", "they", "them", "tell", "me", "us", "please",
+    "currently", "right", "now", "any", "anyone", "anything", "still",
+}
+
+
+def _search_terms(query: str) -> list[str]:
+    """Content words from a natural-language question, ready for tsquery."""
+    seen, out = set(), []
+    for w in _WORD.findall(query.lower()):
+        if len(w) < 2 or w in _QUESTION_WORDS or w in seen:
+            continue
+        seen.add(w)
+        out.append(w)
+    return out[:12]   # cap: a rambling question shouldn't OR the whole archive
 
 log = logging.getLogger("bb.db")
 
@@ -188,29 +214,55 @@ class Database:
 
     # --- search (powers /ask) -------------------------------------------------
     async def search_updates(self, query: str, limit: int = 40) -> list[Update]:
-        """Full-text search over the archive, newest first. Falls back to ILIKE
-        if the tsquery parses to nothing (e.g. all stop-words)."""
-        rows = await self.fetch(
-            """
-            SELECT content_hash, source, author, title, body, link, published_at
-            FROM updates
-            WHERE to_tsvector('english', title || ' ' || body)
-                  @@ plainto_tsquery('english', $1)
-            ORDER BY published_at DESC
-            LIMIT $2
-            """,
-            query, limit,
-        )
-        if not rows:
+        """Relevance-ranked full-text search over the archive.
+
+        Built from hard experience: plainto_tsquery AND-s every term, so a MORE
+        specific question returned FEWER results — asking "who is playing in the
+        veto comp" required play & veto & comp together, and since the English
+        stemmer turns "comp" into 'comp' but "competition" into 'competit', the
+        one update holding the answer ("Veto Competition players...") could never
+        match at all.
+
+        So: OR the terms, prefix-match them (comp:* DOES match "competition",
+        play:* matches "players"), and order by relevance rather than raw recency
+        so the best update survives the LIMIT.
+        """
+        terms = _search_terms(query)
+        if terms:
+            ts = " | ".join(f"{t}:*" for t in terms)
             rows = await self.fetch(
                 """
                 SELECT content_hash, source, author, title, body, link, published_at
-                FROM updates WHERE title ILIKE '%' || $1 || '%' OR body ILIKE '%' || $1 || '%'
+                FROM updates
+                WHERE to_tsvector('english', title || ' ' || body)
+                      @@ to_tsquery('english', $1)
+                ORDER BY ts_rank_cd(to_tsvector('english', title || ' ' || body),
+                                    to_tsquery('english', $1)) DESC,
+                         published_at DESC
+                LIMIT $2
+                """,
+                ts, limit,
+            )
+            if rows:
+                return [self._to_update(r) for r in rows]
+
+        # Fallback: match ANY single term as a substring. (The old fallback
+        # ILIKE'd the entire question as one string, which essentially never
+        # matched anything.)
+        if terms:
+            like = await self.fetch(
+                """
+                SELECT content_hash, source, author, title, body, link, published_at
+                FROM updates
+                WHERE EXISTS (
+                    SELECT 1 FROM unnest($1::text[]) AS t
+                    WHERE title ILIKE '%' || t || '%' OR body ILIKE '%' || t || '%')
                 ORDER BY published_at DESC LIMIT $2
                 """,
-                query, limit,
+                terms, limit,
             )
-        return [self._to_update(r) for r in rows]
+            return [self._to_update(r) for r in like]
+        return []
 
     async def count_mentions(self, name: str, days: int = 7) -> int:
         return await self.fetchval(
