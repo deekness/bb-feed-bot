@@ -66,6 +66,7 @@ bluesky_accounts:
   - bbnutters.bsky.social
   - rbbq.bsky.social
   - bigbroaccess.bsky.social
+  - thebbpresident.bsky.social
 
 # Generic, season-agnostic keywords that mark a post as BB-related.
 # (Roster names are also treated as relevance signals automatically.)
