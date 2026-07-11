@@ -15,6 +15,17 @@ log = logging.getLogger("bb.trackers.game_state")
 
 _MIN_CONFIDENCE = 0.6  # ignore low-confidence game-state guesses
 
+# Insertion order within a batch: prerequisites land before the roles that
+# depend on them, so a single update reporting a full veto ceremony still works.
+_ROLE_ORDER = {"hoh": 0, "nominee": 1, "veto_winner": 2, "veto_used_on": 3,
+               "replacement_nominee": 4, "evicted": 5}
+
+# Causal prerequisites. In Big Brother a replacement nominee CANNOT exist unless
+# the veto was actually used — so a rumored/planned renom ("Melody is the renom
+# if someone wins veto") is structurally rejected, no matter how confidently the
+# feeds discuss it. This is the backstop for the LLM prompt rule.
+_REQUIRES = {"replacement_nominee": "veto_used_on"}
+
 
 class GameStateTracker:
     def __init__(self, db: Database, season_start: date):
@@ -29,10 +40,24 @@ class GameStateTracker:
         today = today or date.today()
         return max(1, (today - self.season_start).days + 1)
 
+    async def _has_role(self, week: int, role: str) -> bool:
+        return bool(await self.db.fetchval(
+            "SELECT 1 FROM game_state WHERE week = $1 AND role = $2 LIMIT 1",
+            week, role))
+
     async def ingest(self, events: list) -> None:
         week = self.current_week()
+        # Prerequisites first, so a batch that reports the whole veto ceremony
+        # (veto used AND the replacement) still records both.
+        events = sorted(events, key=lambda e: _ROLE_ORDER.get(e.role, 99))
         for e in events:
             if e.confidence < _MIN_CONFIDENCE:
+                continue
+            prereq = _REQUIRES.get(e.role)
+            if prereq and not await self._has_role(week, prereq):
+                log.info("rejected %s=%s: no %s recorded this week (likely a "
+                         "rumored plan, not a completed ceremony)",
+                         e.role, e.houseguest, prereq)
                 continue
             try:
                 await self.db.execute(
