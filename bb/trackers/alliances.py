@@ -2,7 +2,13 @@
 
 The LLM extractor proposes; this engine decides. An alliance becomes "active"
 only after enough corroboration; confidence decays without fresh mentions;
-and human confirm/reject (the `locked` flag) is never overwritten by the
+Locking semantics: /confirmalliance pins confidence at 100% and exempts the
+alliance from decay — but it can STILL be marked fracturing/dissolved by explicit
+evidence, because confirmed alliances break up constantly in this game. A
+/rejectalliance verdict is absolute: it stays dead and cannot be resurrected.
+/unlockalliance returns an alliance to full automatic management.
+
+Human confirm/reject (the `locked` flag) is never overwritten by the
 automatic pipeline. Members are always roster-validated upstream.
 
 Matching rules (audit fix — the old "any 2 shared members" rule snowballed
@@ -71,7 +77,27 @@ class AllianceTracker:
         await self.db.execute("UPDATE alliances SET last_seen = now() WHERE id = $1", alliance_id)
 
         if match["locked"]:
-            # Human-decided (confirmed or rejected): do not auto-modify status/confidence.
+            # Human-decided. A REJECTED alliance (locked + dissolved) stays dead —
+            # fresh chatter must never resurrect something you ruled out.
+            if match["status"] == "dissolved":
+                return
+            # A CONFIRMED alliance keeps its human-set confidence and is immune to
+            # decay — but it can still BREAK UP. Confirmed alliances fracture all
+            # the time in this game, and freezing them at 100% "active" forever
+            # would make the bot blind to exactly the betrayal you most want to
+            # know about. So explicit dissolution evidence still lands; only the
+            # confidence drift is locked out.
+            if proposal.status in ("fracturing", "dissolved"):
+                await self.db.execute(
+                    "UPDATE alliances SET status = $1 WHERE id = $2",
+                    proposal.status, alliance_id)
+                log.info("locked alliance #%s -> %s (explicit evidence)",
+                         alliance_id, proposal.status)
+            # Still adopt a name if they finally christen themselves.
+            if proposal.name and not match["name"]:
+                await self.db.execute(
+                    "UPDATE alliances SET name = $1 WHERE id = $2",
+                    proposal.name, alliance_id)
             return
 
         import datetime as _dt
@@ -238,6 +264,14 @@ class AllianceTracker:
             alliance_id,
         )
         return _rowcount(result) > 0
+
+    async def unlock(self, alliance_id: int) -> bool:
+        """Hand an alliance back to the tracker: confidence, promotion, decay and
+        dissolution all resume automatically. Use when you'd rather the bot
+        manage it than pin it by hand."""
+        res = await self.db.execute(
+            "UPDATE alliances SET locked = FALSE WHERE id = $1", alliance_id)
+        return res.endswith("1")
 
     async def reject(self, alliance_id: int) -> bool:
         result = await self.db.execute(

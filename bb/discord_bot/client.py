@@ -235,9 +235,17 @@ class BBBot(commands.Bot):
                         for a in pending[:6])
                     items.append((
                         "alliance_review",
-                        f"**{len(pending)} alliance(s) awaiting review:**\n{lines}\n"
-                        "`/alliance <id>` shows the evidence, then "
-                        "`/confirmalliance <id>` or `/rejectalliance <id>`.", 3))
+                        f"**{len(pending)} alliance(s) the bot is tracking on its "
+                        f"own:**\n{lines}\n"
+                        "_No action needed_ — these are tracked, promoted and "
+                        "dissolved automatically as evidence changes. Step in only "
+                        "to overrule the bot:\n"
+                        "`/alliance <id>` — see the evidence behind one\n"
+                        "`/confirmalliance <id>` — you know it's real (pins it, "
+                        "immune to decay; can still fracture)\n"
+                        "`/rejectalliance <id>` — it's not real (kills it for good)\n"
+                        "`/unlockalliance <id>` — hand one back to automatic "
+                        "tracking.", 3))
 
             if not items:
                 return
@@ -258,7 +266,8 @@ class BBBot(commands.Bot):
                 title="🔔 Admin to-do", color=0xF39C12,
                 description="\n\n".join(m for _, m in due)[:4000],
                 timestamp=now)
-            embed.set_footer(text="I'll re-nudge each item until it's handled.")
+            embed.set_footer(text="Alliance tracking runs automatically — these are FYI, "
+                                  "not chores.")
             if await self._send_admin_dm(embed):
                 for key, _ in due:
                     sent[key] = now.date().isoformat()

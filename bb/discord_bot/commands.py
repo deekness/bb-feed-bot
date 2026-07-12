@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /status,
+        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /status,
         /testdm
 Owner:  /sync
 
@@ -426,6 +426,20 @@ class BBCommands(commands.Cog):
         ok = await self.bot.alliances.confirm(alliance_id)
         await interaction.response.send_message(
             f"{'✅ Confirmed' if ok else '❌ Not found'}: alliance #{alliance_id}", ephemeral=True)
+
+    @app_commands.command(name="unlockalliance",
+                          description="(Admin) Hand an alliance back to automatic tracking.")
+    @app_commands.describe(alliance_id="The #id shown in /alliances")
+    async def unlockalliance(self, interaction: discord.Interaction, alliance_id: int):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        ok = await self.bot.alliances.unlock(alliance_id)
+        await interaction.response.send_message(
+            (f"🔓 Alliance #{alliance_id} is back under automatic tracking — its "
+             "confidence, promotion, decay and dissolution will all update from "
+             "the feeds again." if ok else f"No alliance #{alliance_id}."),
+            ephemeral=True)
 
     @app_commands.command(name="rejectalliance", description="(Admin) Dismiss a wrong alliance.")
     async def rejectalliance(self, interaction: discord.Interaction, alliance_id: int):
