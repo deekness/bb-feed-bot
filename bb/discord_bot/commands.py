@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /status,
+        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -326,7 +326,6 @@ class BBCommands(commands.Cog):
         if st.get("text"):
             src = _sent_clamp(st["text"], 200)
             embed.add_field(name="Latest signal", value=src, inline=False)
-        embed.set_footer(text="via @feed-bot.bsky.social")
         await interaction.response.send_message(embed=embed)
 
     @app_commands.command(name="hamsters", description="Show the current season roster and nicknames.")
@@ -559,6 +558,26 @@ class BBCommands(commands.Cog):
                 ephemeral=True)
             return
         await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
+        name="setfeedschannel",
+        description="(Admin) Send feed-state alerts (feeds back/down) to a channel.")
+    @app_commands.describe(channel="Where feed alerts go. Omit to use the main channel.")
+    async def setfeedschannel(self, interaction: discord.Interaction,
+                              channel: discord.TextChannel | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        if channel is None:
+            await self.bot.db.kv_set("feeds_channel_id", None)
+            await interaction.response.send_message(
+                "Feed alerts will post in the main update channel again.",
+                ephemeral=True)
+            return
+        await self.bot.db.kv_set("feeds_channel_id", channel.id)
+        await interaction.response.send_message(
+            f"📡 Feed-state alerts (feeds back / down) will post in "
+            f"{channel.mention}.", ephemeral=True)
 
     @app_commands.command(
         name="setbriefingchannel",

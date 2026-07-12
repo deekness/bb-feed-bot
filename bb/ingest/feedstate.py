@@ -37,6 +37,14 @@ _WBRB_MARKERS = ("wbrb", "we'll be right back", "we will be right back",
                  "feeds cut", "feeds down")
 
 _DURATION = re.compile(r"duration:\s*([^)\n]+)", re.IGNORECASE)
+_HASHTAG = re.compile(r"(?:(?<=\s)|^)#\w+")
+
+
+def strip_hashtags(text: str) -> str:
+    """The upstream post verbatim, minus its hashtags (#BB28 etc.)."""
+    out = _HASHTAG.sub("", text)
+    out = re.sub(r"[ \t]{2,}", " ", out)
+    return "\n".join(ln.rstrip() for ln in out.splitlines()).strip()
 
 STATE_LIVE = "live"
 STATE_ANIPALS = "anipals"

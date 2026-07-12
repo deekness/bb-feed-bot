@@ -30,7 +30,7 @@ from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
-                                FeedStateMonitor, duration_in)
+                                FeedStateMonitor, duration_in, strip_hashtags)
 from ..ingest.pipeline import IngestPipeline
 from ..ingest.rss import RSSSource
 from ..llm import LLM
@@ -165,6 +165,19 @@ class BBBot(commands.Bot):
         if isinstance(ch, discord.TextChannel):
             return ch
         log.warning("recap channel %s not found — falling back to updates", cid)
+        return await self.update_channel()
+
+    async def feeds_channel(self) -> discord.TextChannel | None:
+        """Where feed-state alerts (feeds back / down) go. Falls back to the
+        main update channel."""
+        cid = (await self.db.kv_get("feeds_channel_id")
+               or self.settings.feeds_channel_id)
+        if not cid:
+            return await self.update_channel()
+        ch = self.get_channel(int(cid))
+        if isinstance(ch, discord.TextChannel):
+            return ch
+        log.warning("feeds channel %s not found — falling back", cid)
         return await self.update_channel()
 
     async def briefing_channel(self) -> discord.TextChannel | None:
@@ -416,13 +429,17 @@ class BBBot(commands.Bot):
         await self.wait_until_ready()
 
     async def _poll_feed_state(self) -> None:
-        """Track the upstream feed-state account and announce transitions.
+        """Relay the upstream feed-state account.
 
-        Rules: only a NEW post (unseen url) that CHANGES the state and is
-        FRESH (<10 min old) gets announced — so a restart quietly absorbs
-        history instead of replaying it, and upstream repeats of the same
-        state never double-post. State is always recorded to bot_kv either
-        way so /feeds stays accurate.
+        These are EVENTS, not state transitions. The original code only
+        announced when the state CHANGED — but @feed-bot posts almost nothing
+        except "Feeds are back", so the tracked state went live -> live -> live,
+        `changed` was never true, and after the first post the bot went
+        permanently silent. Every NEW post is now relayed.
+
+        A post must still be FRESH (<15 min) so a restart quietly absorbs
+        history instead of replaying yesterday's outages. State is recorded to
+        bot_kv regardless, so /feeds stays accurate.
         """
         if not self._in_season():
             return
@@ -431,34 +448,28 @@ class BBBot(commands.Bot):
             return
         prev = await self.db.kv_get("feed_state") or {}
         if sig["post_url"] and sig["post_url"] == prev.get("post_url"):
-            return  # nothing new upstream
-        changed = sig["state"] != prev.get("state")
+            return  # already relayed this exact post
         fresh = (dt.datetime.now(dt.timezone.utc) - sig["created_at"]
-                 ) <= dt.timedelta(minutes=10)
+                 ) <= dt.timedelta(minutes=15)
         await self.db.kv_set("feed_state", {
             "state": sig["state"],
             "since": sig["created_at"].isoformat(),
             "text": sig["text"][:300],
             "post_url": sig["post_url"],
         })
-        if not (changed and fresh):
+        if not fresh:
             return
-        channel = await self.update_channel()
+        channel = await self.feeds_channel()
         if not channel:
             return
-        title, color = self._FEED_STATE_STYLE[sig["state"]]
-        if sig["state"] == STATE_LIVE:
-            dur = duration_in(sig["text"])
-            desc = (f"Down for {dur}. Back to the house." if dur
-                    else "Back to the house.")
-        elif sig["state"] == STATE_ANIPALS:
-            desc = "Comp or ceremony is likely underway."
-        else:
-            desc = "Production has the feeds down."
-        embed = discord.Embed(title=title, description=desc, color=color,
+        _title, color = self._FEED_STATE_STYLE[sig["state"]]
+        # Relay their wording verbatim — the duration is the whole point, and
+        # they say it better than a paraphrase would. Hashtags stripped.
+        body = strip_hashtags(sig["text"])
+        embed = discord.Embed(description=body, color=color,
                               timestamp=sig["created_at"])
-        embed.set_footer(text=f"via @{self.feedstate.handle}")
         await channel.send(embed=embed)
+        log.info("relayed feed-state post: %s", sig["state"])
 
     async def _feeds_are_live(self) -> bool:
         """False when hard game facts must NOT be written:
