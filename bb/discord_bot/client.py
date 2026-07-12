@@ -24,7 +24,7 @@ import discord
 from discord.ext import commands, tasks
 
 from ..analysis.extract import Extractor
-from ..analysis.summarize import (Summarizer, sentence_clamp,
+from ..analysis.summarize import (Summarizer, event_category, sentence_clamp,
                                   strip_links, urgent_keyword)
 from ..config import Season, Settings
 from ..db import Database
@@ -72,7 +72,7 @@ ANT_SIGNOFF = ("Still quiet. Even the ants have gone to bed — I'll pipe back u
 
 
 class BBBot(commands.Bot):
-    BREAKING_COOLDOWN_S = 20 * 60  # per (keyword+names) 🚨 suppression window
+    BREAKING_COOLDOWN_S = 90 * 60  # per-EVENT 🚨 suppression window
 
     def __init__(self, settings: Settings, season: Season):
         intents = discord.Intents.default()
@@ -108,7 +108,8 @@ class BBBot(commands.Bot):
         self.votes = VoteTracker(self.db)
 
         self._recent_for_context: list = []  # last few processed updates
-        self._breaking_last: dict[str, float] = {}  # (keyword|names) -> monotonic ts
+        self._breaking_last: dict[str, float] = {}  # event-category -> monotonic ts
+        self._breaking_recent: list[str] = []       # lines already alerted (LLM dedupe)
         self._quiet_streak: int = 0
         self._ant_bag: list[str] = []
         self._live_mode: bool = False
@@ -615,18 +616,28 @@ class BBBot(commands.Bot):
                     if u.source == "bluesky" and not self.roster.is_empty and not names:
                         continue
                     # Stage 2 (cheap): cooldown BEFORE the LLM, so a burst of
-                    # chatter about one event can't run up the bill.
-                    key = f"{kw}|{','.join(names)}"
+                    # chatter about one event can't run up the bill. Keyed on the
+                    # EVENT, not the matched keyword — a single veto win gets
+                    # reported as "wins the veto" / "won POV" / "won the Power of
+                    # Veto", which used to be three different keys and therefore
+                    # three separate alerts.
+                    key = f"{event_category(kw)}|{','.join(names)}"
                     now_mono = time.monotonic()
                     if now_mono - self._breaking_last.get(key, float("-inf")) < self.BREAKING_COOLDOWN_S:
                         continue
                     # Stage 3 (LLM): the real gate. Returns None for discussion,
-                    # planning, jokes and speculation; a clean one-liner only for
-                    # an event that actually HAPPENED.
-                    line = await self.summarizer.breaking(u, await self.house_context())
+                    # planning, jokes and speculation — and now also for an event
+                    # already alerted (different updaters, different wording, same
+                    # event), which the category key alone can miss when one post
+                    # names extra houseguests.
+                    line = await self.summarizer.breaking(
+                        u, await self.house_context(),
+                        recent_alerts=self._breaking_recent)
                     if not line:
                         continue
                     self._breaking_last[key] = now_mono
+                    self._breaking_recent.append(line)
+                    del self._breaking_recent[:-8]   # keep the last few only
                     await channel.send(embed=discord.Embed(
                         title="🚨 Breaking", description=line,
                         color=0xE74C3C, timestamp=dt.datetime.now(self.tz)))
