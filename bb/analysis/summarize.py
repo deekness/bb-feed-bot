@@ -42,8 +42,10 @@ _IMPORTANCE = {
 URGENT_KEYWORDS = (
     # comp results
     "wins hoh", "won hoh", "wins the hoh", "is the new hoh", "new hoh",
+    "wins head of household", "won head of household",
     "wins veto", "won veto", "wins the veto", "won the veto", "wins pov",
-    "won pov", "wins the pov",
+    "won pov", "wins the pov", "won the power of veto", "wins the power of veto",
+    "won the golden power of veto", "wins the golden power of veto",
     # ceremony outcomes
     "nomination ceremony", "veto ceremony", "veto meeting", "has been nominated",
     "nominated for eviction", "final nominees", "veto was used", "used the veto",
@@ -158,6 +160,46 @@ _URGENT_RES = tuple(
 )
 
 
+# A single real event gets reported by many updaters in many phrasings — "wins
+# the veto", "won POV", "has won the Power of Veto". Keying the cooldown on the
+# matched keyword STRING therefore let one veto win fire three separate alerts.
+# Collapse every keyword into the EVENT it describes instead.
+_EVENT_CATEGORY = (
+    ("veto_win",     ("wins veto", "won veto", "wins the veto", "won the veto",
+                      "wins pov", "won pov", "wins the pov",
+                      "won the power of veto", "wins the power of veto",
+                      "won the golden power of veto",
+                      "wins the golden power of veto")),
+    ("hoh_win",      ("wins hoh", "won hoh", "wins the hoh", "is the new hoh",
+                      "new hoh", "wins head of household",
+                      "won head of household")),
+    ("veto_ceremony",("veto ceremony", "veto meeting", "veto was used",
+                      "used the veto", "did not use the veto", "vetoed",
+                      "replacement nominee")),
+    ("nominations",  ("nomination ceremony", "has been nominated",
+                      "nominated for eviction", "final nominees")),
+    ("eviction",     ("evicted", "eviction results", "has been evicted")),
+    ("exit",         ("self-evict", "self-evicted", "expelled", "ejected",
+                      "walked out", "quit the game", "removed from the house",
+                      "removed from the game")),
+    ("twist",        ("battle back", "returns to the house", "re-enters",
+                      "double eviction", "triple eviction", "diamond veto",
+                      "coup")),
+    ("blowup",       ("screaming match", "blowup", "blow up", "shouting match",
+                      "fight broke out", "got into it", "yelling at",
+                      "screaming at", "in tears", "stormed off")),
+)
+
+
+def event_category(keyword: str) -> str:
+    """The event a trigger keyword describes — the cooldown key, so that every
+    phrasing of one real event collapses to a single alert."""
+    for cat, words in _EVENT_CATEGORY:
+        if keyword in words:
+            return cat
+    return keyword
+
+
 def urgent_keyword(update: Update) -> str | None:
     """The first urgent keyword present in the update, or None. Word-boundary
     matched — a plain substring test made "coup" fire inside "couple" and lit up
@@ -231,7 +273,8 @@ class Summarizer:
         return self._pattern_whats_happening(top[:5], len(updates))
 
     # --- breaking alert (LLM-gated; discussion must NOT fire) ---------------
-    async def breaking(self, update: Update, house_context: str = "") -> str | None:
+    async def breaking(self, update: Update, house_context: str = "",
+                       recent_alerts: list[str] | None = None) -> str | None:
         """Decide whether an update is REALLY breaking, and if so write the
         one-line alert. Returns None to suppress.
 
@@ -247,8 +290,10 @@ class Summarizer:
             " You are triaging a Big Brother live-feed update for a BREAKING "
             "alert. Reply with EXACTLY one of:\n"
             "SKIP — if it is houseguests DISCUSSING, planning, speculating about, "
-            "or reacting to something; a joke; general chatter; or anything not "
-            "yet decided. Discussion of a veto/backdoor/target is NOT breaking.\n"
+            "or reacting to something; a joke; general chatter; anything not yet "
+            "decided; OR if it reports the SAME EVENT as one of the ALREADY "
+            "ALERTED items below, even in different words. Discussion of a "
+            "veto/backdoor/target is NOT breaking.\n"
             "ALERT: <one clean sentence> — ONLY if a real event has ACTUALLY "
             "HAPPENED: a competition was won, a ceremony concluded, someone was "
             "nominated/evicted/removed/walked, a major twist occurred, or a "
@@ -256,7 +301,12 @@ class Summarizer:
             "The sentence must be plain, factual, and self-contained. Do not "
             "copy the updater's shorthand, timestamps, or tags like (NT)."
         )
-        user = f"{self._ctx(house_context)}UPDATE:\n{update.text}"
+        already = ""
+        if recent_alerts:
+            joined = "\n".join(f"- {a}" for a in recent_alerts[-6:])
+            already = ("ALREADY ALERTED (do not repeat these events):\n"
+                       f"{joined}\n\n")
+        user = f"{self._ctx(house_context)}{already}UPDATE:\n{update.text}"
         text = await self.llm.text(system, user, max_tokens=120)
         if not text:
             return None
