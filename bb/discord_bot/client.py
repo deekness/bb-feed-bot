@@ -104,7 +104,8 @@ class BBBot(commands.Bot):
         self.summarizer = Summarizer(self.llm, self.house_tz, self.roster)
         self.alliances = AllianceTracker(self.db)
         self.relationships = RelationshipTracker(self.db)
-        self.game_state = GameStateTracker(self.db, season.start_date)
+        self.game_state = GameStateTracker(self.db, season.start_date,
+                                             season.house_day_one)
         self.votes = VoteTracker(self.db)
 
         self._recent_for_context: list = []  # last few processed updates

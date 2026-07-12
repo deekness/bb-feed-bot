@@ -374,17 +374,25 @@ class Summarizer:
         body = "\n\n".join(blocks)
         total = sum(s["update_count"] for s in hourly_summaries)
 
-        system = _NEUTRALITY
+        system = _NEUTRALITY + " " + self._naming_rule()
         user = (
             f"{self._ctx(house_context)}"
             "Below are the hour-by-hour summaries for the last day in the Big "
-            "Brother house. Write a day recap:\n"
-            "1. A short narrative paragraph on the day's main storyline(s). Where "
-            "the CURRENT HOUSE STATE shows alliances, relationship beats "
-            "(especially betrayals), or a vote board, use them to frame WHY the "
-            "day mattered — how alliances shifted or who turned on whom — rather "
-            "than just listing events.\n"
-            "2. 4-7 bullet points of the key developments, chronological.\n"
+            "Brother house. Write a day recap that someone will actually want to "
+            "read — scannable, not a wall of text.\n\n"
+            "EXACT STRUCTURE (follow it precisely):\n"
+            "1. **A one-line hook** in bold — the single sentence that captures "
+            "the day. No heading, no title (the post already has one).\n"
+            "2. **The Story** — the day's narrative, broken into 2-3 SHORT "
+            "paragraphs of 2-4 sentences each. Each paragraph covers ONE thread "
+            "(e.g. the comp and its fallout; the alliance shifts; the "
+            "showmance/personal drama). Put a blank line between them. Never "
+            "write a paragraph longer than 4 sentences — if a thread needs more, "
+            "split it. Use the CURRENT HOUSE STATE to explain WHY the day "
+            "mattered (who gained power, who got betrayed), not just what "
+            "happened.\n"
+            "3. **Key Developments** — 4-7 bullets, chronological, each starting "
+            "with a bolded 2-4 word label followed by a colon.\n\n"
             "Cover the whole day — do not drop threads that only appear in one "
             f"hour.\n\nHOURLY SUMMARIES:\n\n{body}"
         )

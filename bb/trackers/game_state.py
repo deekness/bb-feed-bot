@@ -28,17 +28,24 @@ _REQUIRES = {"replacement_nominee": "veto_used_on"}
 
 
 class GameStateTracker:
-    def __init__(self, db: Database, season_start: date):
+    def __init__(self, db: Database, season_start: date,
+                 house_day_one: date | None = None):
         self.db = db
-        self.season_start = season_start
+        self.season_start = season_start        # premiere — drives WEEK math
+        self.house_day_one = house_day_one      # move-in — drives DAY math
 
     def current_week(self, today: date | None = None) -> int:
         today = today or date.today()
         return max(1, ((today - self.season_start).days // 7) + 1)
 
     def current_day(self, today: date | None = None) -> int:
+        """The house day as the FEEDS count it. Big Brother's Day 1 is move-in
+        day, which is several days before the premiere airs — so counting from
+        the premiere made the bot's "Day 3" collide with the feeds' "Day 5".
+        Falls back to the premiere date when house_day_one isn't configured."""
         today = today or date.today()
-        return max(1, (today - self.season_start).days + 1)
+        day_one = self.house_day_one or self.season_start
+        return max(1, (today - day_one).days + 1)
 
     async def _has_role(self, week: int, role: str) -> bool:
         return bool(await self.db.fetchval(

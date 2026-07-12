@@ -10,6 +10,10 @@ season_name: "Big Brother 28"
 # Used to compute "Day N" and the current game week. Set to premiere date.
 season_start_date: "2026-07-09"
 
+# Big Brother counts Day 1 from MOVE-IN, not premiere night — the feeds were
+# saying "Day 5" while the bot said "Day 3". Weeks still run from the premiere.
+house_day_one: "2026-07-07"
+
 # Live-feed updates RSS feed (Jokers Updates).
 rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 

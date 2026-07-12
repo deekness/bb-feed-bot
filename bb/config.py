@@ -49,6 +49,7 @@ class Season:
     nicknames: dict[str, str]
     bluesky_accounts: list[str]
     bb_keywords: list[str]
+    house_day_one: date | None = None
     rss_fallback_urls: list[str] = field(default_factory=list)
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
@@ -67,6 +68,8 @@ class Season:
             number=int(data["season_number"]),
             name=data.get("season_name", f"Big Brother {data['season_number']}"),
             start_date=date.fromisoformat(str(data["season_start_date"])),
+            house_day_one=(date.fromisoformat(str(data["house_day_one"]))
+                           if data.get("house_day_one") else None),
             rss_url=data["rss_url"],
             rss_fallback_urls=list(data.get("rss_fallback_urls") or []),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
