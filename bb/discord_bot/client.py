@@ -827,7 +827,7 @@ class BBBot(commands.Bot):
         for embed in embeds:
             await channel.send(embed=embed)
 
-    BRIEFING_HOUR = 11   # house time (US/Pacific)
+    BRIEFING_HOUR = 9    # house time (US/Pacific)
 
     @tasks.loop(minutes=15)
     async def briefing_loop(self) -> None:
