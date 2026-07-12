@@ -221,11 +221,23 @@ class Extractor:
             return Extraction()
         return self._validate(data, updates)
 
-    def _validate(self, data: dict, updates: list) -> Extraction:
+    def _validate(self, data, updates: list) -> Extraction:
+        # Forced tool-use gives the model a schema, but it does not always honour
+        # it: it occasionally emits a bare STRING where an object is required.
+        # One such item used to raise "'str' object has no attribute 'get'" and
+        # abort the ENTIRE ingest cycle — silently discarding every alliance,
+        # relationship, game event and vote plan in that batch. Degrade to
+        # "found nothing" instead of taking the loop down.
+        if not isinstance(data, dict):
+            log.warning("extraction: payload was %s, not an object",
+                        type(data).__name__)
+            return Extraction()
         result = Extraction()
 
         def src(item: dict) -> str:
             try:
+                if not isinstance(item, dict):
+                    return ""
                 i = int(item.get("source_index", 0))
                 if 1 <= i <= len(updates):
                     return updates[i - 1].content_hash
@@ -234,6 +246,9 @@ class Extractor:
             return updates[0].content_hash if updates else ""
 
         for a in data.get("alliances", []) or []:
+            if not isinstance(a, dict):
+                log.warning("extraction: skipping non-object alliance %r", a)
+                continue
             members = self.roster.resolve_all(a.get("members", []) or [])
             if len(members) < 2:  # an alliance needs >= 2 real houseguests
                 continue
@@ -250,6 +265,9 @@ class Extractor:
             ))
 
         for r in data.get("relationship_changes", []) or []:
+            if not isinstance(r, dict):
+                log.warning("extraction: skipping non-object relationship %r", r)
+                continue
             pair = self.roster.resolve_all(r.get("houseguests", []) or [])
             if len(pair) != 2:
                 continue
@@ -259,6 +277,9 @@ class Extractor:
             ))
 
         for g in data.get("game_state", []) or []:
+            if not isinstance(g, dict):
+                log.warning("extraction: skipping non-object game event %r", g)
+                continue
             hg = self.roster.resolve(g.get("houseguest"))
             if not hg:
                 continue
@@ -270,6 +291,9 @@ class Extractor:
             ))
 
         for v in data.get("vote_plans", []) or []:
+            if not isinstance(v, dict):
+                log.warning("extraction: skipping non-object vote plan %r", v)
+                continue
             voter = self.roster.resolve(v.get("voter"))
             target = self.roster.resolve(v.get("target"))
             if not voter or not target or voter == target:
