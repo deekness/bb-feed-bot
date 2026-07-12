@@ -7,6 +7,7 @@ import re
 from datetime import datetime, timezone
 
 import aiohttp
+from urllib.parse import quote
 import feedparser
 
 from ..models import Update
@@ -34,38 +35,79 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
 
 
 class RSSSource:
+    """Jokers RSS, with a proxy escape hatch.
+
+    Jokers' host (169.61.62.206) refuses TCP connections from datacenter IPs —
+    the feed serves fine from a home connection but Railway can't reach it at
+    all. Crucially, rss./forums./www.jokersupdates.com ALL resolve to that one
+    IP, so alternate hostnames buy nothing: they're three doors to the same
+    locked building.
+
+    The only fix is to make the request from a different IP. `proxy_templates`
+    are URL patterns containing {url} (the URL-encoded feed address); a proxy
+    service fetches Jokers from its own address and hands back the raw XML.
+
+    Direct URLs are always tried FIRST, so if Jokers ever unblocks cloud IPs
+    the bot silently goes back to the source and stops depending on a
+    third party.
+    """
+
     name = "rss"
 
     def __init__(self, url: str, timeout: int = 20,
-                 fallback_urls: list[str] | None = None):
-        # Candidate feed URLs, tried in order. The primary host has been seen to
-        # refuse TCP connections from Railway while the site itself is up, so a
-        # mirror/alternate path keeps the richest source alive.
+                 fallback_urls: list[str] | None = None,
+                 proxy_templates: list[str] | None = None):
         self.urls = [url] + list(fallback_urls or [])
+        self.proxy_templates = list(proxy_templates or [])
         self.timeout = timeout
         self.consecutive_failures = 0   # read by the bot for source-health alerts
+        self.using_proxy = False        # surfaced in /status
         self._active_url = url
+
+    def _candidates(self) -> list[tuple[str, str, bool]]:
+        """(label, url, is_proxy) — direct first, proxied only as a fallback."""
+        direct = ([self._active_url] +
+                  [u for u in self.urls if u != self._active_url])
+        out = [(u, u, False) for u in direct]
+        primary = self.urls[0]
+        for tpl in self.proxy_templates:
+            try:
+                proxied = tpl.replace("{url}", quote(primary, safe=""))
+            except Exception:
+                continue
+            out.append((f"proxy:{tpl.split('/')[2]}", proxied, True))
+        return out
 
     async def fetch(self) -> list[Update]:
         raw = None
         errors: list[str] = []
         async with aiohttp.ClientSession(headers={"User-Agent": _UA}) as session:
-            # Try the URL that worked last time first, then the rest.
-            ordered = ([self._active_url] +
-                       [u for u in self.urls if u != self._active_url])
-            for url in ordered:
+            for label, url, is_proxy in self._candidates():
                 try:
                     async with session.get(url, timeout=self.timeout) as resp:
                         if resp.status != 200:
-                            errors.append(f"{url} -> HTTP {resp.status}")
+                            errors.append(f"{label} -> HTTP {resp.status}")
                             continue
-                        raw = await resp.read()
-                    if self._active_url != url:
+                        body = await resp.read()
+                    # A proxy can return 200 with an error page instead of the
+                    # feed, so require it to actually look like RSS/XML.
+                    if b"<rss" not in body[:600] and b"<?xml" not in body[:600]:
+                        errors.append(f"{label} -> 200 but not XML")
+                        continue
+                    raw = body
+                    if is_proxy and not self.using_proxy:
+                        log.warning("RSS direct fetch blocked — falling back to %s",
+                                    label)
+                    elif not is_proxy and self.using_proxy:
+                        log.info("RSS direct fetch working again — proxy dropped")
+                    elif not is_proxy and self._active_url != url:
                         log.info("RSS switched to working URL: %s", url)
+                    self.using_proxy = is_proxy
+                    if not is_proxy:
                         self._active_url = url
                     break
                 except Exception as e:
-                    errors.append(f"{url} -> {e}")
+                    errors.append(f"{label} -> {e}")
 
         if raw is None:
             self.consecutive_failures += 1

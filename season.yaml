@@ -19,9 +19,20 @@ rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 
 # Tried in order if the primary refuses the connection. The rss.* host has been
 # seen to drop TCP connections from Railway while the site itself is up.
-rss_fallback_urls:
-  - "https://forums.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
-  - "https://www.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
+# NOTE: rss./forums./www.jokersupdates.com all resolve to the SAME IP
+# (169.61.62.206), so alternate hostnames are NOT redundancy — when that host
+# blocks datacenter traffic, every one of them fails identically. Left empty.
+rss_fallback_urls: []
+
+# Jokers refuses TCP connections from cloud IPs (verified: the feed returns 200
+# from a home connection, and "Connect call failed" from Railway). These proxies
+# fetch the feed from their OWN address and return the raw XML. Tried only AFTER
+# a direct fetch fails, so if Jokers ever unblocks us the bot goes straight back
+# to the source. {url} is replaced with the URL-encoded feed address.
+rss_proxy_templates:
+  - "https://api.allorigins.win/raw?url={url}"
+  - "https://corsproxy.io/?url={url}"
+  - "https://api.codetabs.com/v1/proxy/?quest={url}"
 
 # ----------------------------------------------------------------------------
 # ROSTER — the heart of the system.

@@ -51,6 +51,7 @@ class Season:
     bb_keywords: list[str]
     house_day_one: date | None = None
     rss_fallback_urls: list[str] = field(default_factory=list)
+    rss_proxy_templates: list[str] = field(default_factory=list)
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -72,6 +73,7 @@ class Season:
                            if data.get("house_day_one") else None),
             rss_url=data["rss_url"],
             rss_fallback_urls=list(data.get("rss_fallback_urls") or []),
+            rss_proxy_templates=list(data.get("rss_proxy_templates") or []),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],

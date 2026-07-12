@@ -94,8 +94,10 @@ class BBBot(commands.Bot):
                        recap_model=settings.llm_model_recap)
         self.roster = Roster.from_season(season)
 
-        self.rss_source = RSSSource(season.rss_url,
-                                    fallback_urls=season.rss_fallback_urls)
+        self.rss_source = RSSSource(
+            season.rss_url,
+            fallback_urls=season.rss_fallback_urls,
+            proxy_templates=season.rss_proxy_templates)
         sources = [self.rss_source,
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
@@ -359,12 +361,13 @@ class BBBot(commands.Bot):
         embed = discord.Embed(
             title="⚠️ Jokers RSS feed is down",
             description=(f"The RSS source has failed **{fails} polls in a row** "
-                         "(~30+ min). Bluesky may still be working, so summaries "
-                         "will keep posting — but they're missing the richest "
-                         "source of house updates.\n\n"
-                         "Check the Railway logs for the exact error. If the host "
-                         "is refusing connections, add a working mirror under "
-                         "`rss_fallback_urls` in season.yaml."),
+                         "(~30+ min), including every proxy. Bluesky is likely "
+                         "still working, so summaries keep posting — but they're "
+                         "missing the richest source of house updates.\n\n"
+                         "Jokers blocks datacenter IPs, so the bot normally "
+                         "reaches it through a proxy. If that proxy is down or "
+                         "rate-limited, add another under `rss_proxy_templates` "
+                         "in season.yaml."),
             color=0xE67E22)
         if await self._send_admin_dm(embed):
             await self.db.kv_set("nudge_rss_date", today)

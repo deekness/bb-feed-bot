@@ -622,6 +622,15 @@ class BBCommands(commands.Cog):
         embed.add_field(name="LLM", value=llm_val, inline=False)
         embed.add_field(name="Channel", value=channel.mention if channel else "not set", inline=True)
         embed.add_field(name="Updates (last hour)", value=str(len(recent)), inline=True)
+        rss = getattr(self.bot, "rss_source", None)
+        if rss is not None:
+            if rss.consecutive_failures:
+                rss_val = f"❌ down ({rss.consecutive_failures} fails)"
+            elif rss.using_proxy:
+                rss_val = "🔁 via proxy (Jokers blocks cloud IPs)"
+            else:
+                rss_val = "✅ direct"
+            embed.add_field(name="Jokers RSS", value=rss_val, inline=True)
         import datetime as _dt
         now = _dt.datetime.now(self.bot.tz)
         ep = self.bot.episode_now()
