@@ -132,6 +132,7 @@ class BBBot(commands.Bot):
         self.ingest_loop.start()
         self.hourly_loop.start()
         self.daily_loop.start()
+        self.briefing_loop.start()
         if self.season.feedstate_enabled:
             self.feedstate_loop.start()
 
@@ -163,6 +164,31 @@ class BBBot(commands.Bot):
             return ch
         log.warning("recap channel %s not found — falling back to updates", cid)
         return await self.update_channel()
+
+    async def briefing_channel(self) -> discord.TextChannel | None:
+        """Where the morning "need to know" brief goes. Falls back to the recap
+        channel, then the main update channel."""
+        cid = (await self.db.kv_get("briefing_channel_id")
+               or self.settings.briefing_channel_id)
+        if not cid:
+            return await self.recap_channel()
+        ch = self.get_channel(int(cid))
+        if isinstance(ch, discord.TextChannel):
+            return ch
+        log.warning("briefing channel %s not found — falling back", cid)
+        return await self.recap_channel()
+
+    async def build_briefing(self):
+        """Assemble the "need to know" brief from the last 24h + tracked state."""
+        now_house = dt.datetime.now(self.house_tz)
+        end = now_house.astimezone(dt.timezone.utc)
+        start = end - dt.timedelta(hours=24)
+        hourlies = await self.db.summaries_between("hourly", start, end)
+        alliances = await self.alliances.active()
+        rels = await self.relationships.notable()
+        return await self.summarizer.need_to_know(
+            hourlies, self.game_state.current_day(now_house.date()),
+            alliances, rels, await self.house_context())
 
     async def _merge_runtime_roster(self) -> None:
         """Re-apply roster changes made at runtime (/addhouseguest etc., stored
@@ -786,6 +812,37 @@ class BBBot(commands.Bot):
             return
         for embed in embeds:
             await channel.send(embed=embed)
+
+    BRIEFING_HOUR = 11   # house time (US/Pacific)
+
+    @tasks.loop(minutes=15)
+    async def briefing_loop(self) -> None:
+        """Posts the "need to know" brief on the first tick at/after
+        BRIEFING_HOUR house time. Marker in bot_kv, so restarts can't
+        double-post or silently skip a day."""
+        try:
+            now_house = dt.datetime.now(self.house_tz)
+            if now_house.hour < self.BRIEFING_HOUR:
+                return
+            today = now_house.date().isoformat()
+            if await self.db.kv_get("last_briefing_date") == today:
+                return
+            await self.db.kv_set("last_briefing_date", today)
+            if not self._in_season():
+                return
+            embed = await self.build_briefing()
+            if not embed:
+                return
+            channel = await self.briefing_channel()
+            if channel:
+                await channel.send(embed=embed)
+                log.info("posted need-to-know briefing")
+        except Exception as e:
+            log.error("briefing loop error: %s", e)
+
+    @briefing_loop.before_loop
+    async def _before_briefing(self) -> None:
+        await self.wait_until_ready()
 
     @tasks.loop(minutes=15)
     async def daily_loop(self) -> None:

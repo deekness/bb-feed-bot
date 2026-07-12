@@ -132,6 +132,7 @@ CREATE INDEX IF NOT EXISTS idx_summaries_kind_end ON summaries(kind, period_end)
 
 -- Additive migrations (safe to re-run; ADD COLUMN IF NOT EXISTS is idempotent).
 ALTER TABLE alliances  ADD COLUMN IF NOT EXISTS one_sided BOOLEAN NOT NULL DEFAULT FALSE;
+ALTER TABLE alliances  ADD COLUMN IF NOT EXISTS one_sided_by TEXT[] NOT NULL DEFAULT '{}';
 ALTER TABLE vote_plans ADD COLUMN IF NOT EXISTS firmness TEXT NOT NULL DEFAULT 'leaning';
 
 CREATE TABLE IF NOT EXISTS bot_kv (

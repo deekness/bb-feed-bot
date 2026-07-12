@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /status,
+        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /status,
         /testdm
 Owner:  /sync
 
@@ -19,6 +19,7 @@ from discord import app_commands
 from discord.ext import commands
 
 from ..analysis.summarize import sentence_clamp as _sent_clamp
+from ..analysis.summarize import one_sided_note as _one_sided_note
 
 log = logging.getLogger("bb.commands")
 
@@ -547,6 +548,37 @@ class BBCommands(commands.Cog):
         await self.bot.db.kv_set("update_channel_id", channel.id)
         await interaction.response.send_message(f"Posts will go to {channel.mention}.", ephemeral=True)
 
+    @app_commands.command(name="needtoknow",
+                          description="Where the game stands right now.")
+    async def needtoknow(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        embed = await self.bot.build_briefing()
+        if not embed:
+            await interaction.followup.send(
+                "Not enough recent feed activity to build a briefing yet.",
+                ephemeral=True)
+            return
+        await interaction.followup.send(embed=embed)
+
+    @app_commands.command(
+        name="setbriefingchannel",
+        description="(Admin) Send the daily 'need to know' brief to a channel.")
+    @app_commands.describe(channel="Where the brief goes. Omit to use the recap channel.")
+    async def setbriefingchannel(self, interaction: discord.Interaction,
+                                 channel: discord.TextChannel | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        if channel is None:
+            await self.bot.db.kv_set("briefing_channel_id", None)
+            await interaction.response.send_message(
+                "Briefing will follow the recap channel again.", ephemeral=True)
+            return
+        await self.bot.db.kv_set("briefing_channel_id", channel.id)
+        await interaction.response.send_message(
+            f"📋 The daily 'need to know' brief will post in {channel.mention} "
+            f"at {self.bot.BRIEFING_HOUR}:00 house time (Pacific).", ephemeral=True)
+
     @app_commands.command(
         name="setrecapchannel",
         description="(Admin) Send daily/weekly recaps to a different channel.")
@@ -626,7 +658,8 @@ class BBCommands(commands.Cog):
         tags = []
         if len(a["members"]) == 2:
             tags.append("final 2")
-        if a.get("one_sided"):
-            tags.append("⚠️ one-sided")
+        note = _one_sided_note(a)
+        if note:
+            tags.append(f"⚠️ {note}")
         suffix = f"  _{' · '.join(tags)}_" if tags else ""
         return f"{lock}**#{a['id']} {name}** — {members}  ({a['confidence']:.0%}){suffix}"

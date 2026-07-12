@@ -79,6 +79,19 @@ _MD_LINK = re.compile(r"\[([^\]]*)\]\((?:[^)]*)\)")
 _BARE_URL = re.compile(r"https?://\S+")
 
 
+def one_sided_note(a: dict) -> str:
+    """Who is playing whom. 'one-sided' alone tells you the deal is fake but
+    not the interesting half — which member is doing the faking."""
+    by = list(a.get("one_sided_by") or [])
+    if not by:
+        return "one-sided" if a.get("one_sided") else ""
+    members = list(a.get("members") or [])
+    played = [m for m in members if m not in by]
+    if played:
+        return f"{'/'.join(by)} playing {'/'.join(played)}"
+    return f"{'/'.join(by)} isn't real on it"
+
+
 def strip_links(text: str) -> str:
     """Remove markdown links (keeping their label) and bare URLs. Bot outputs
     are link-free by policy; raw update texts can carry URLs and the LLM will
@@ -353,6 +366,90 @@ class Summarizer:
             color=0xF1C40F, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"{len(updates)} updates during & after the episode")
+        return embed
+
+    # --- morning briefing: state of the house, not a chronology --------------
+    async def need_to_know(self, hourly_summaries: list[dict], day_number: int,
+                           alliances: list[dict], relationships: list[dict],
+                           house_context: str = "") -> discord.Embed | None:
+        """A "what you need to know" brief: where the game STANDS right now,
+        rather than what happened in order (that's the daily recap's job).
+
+        Deliberately hybrid. The numbered list is written by the model from the
+        last day's summaries, but the alliance map and relationship beats are
+        rendered DIRECTLY from the trackers — they're facts the bot already
+        holds, so there's nothing for the model to get wrong. That tracked map
+        is the thing a human writing this by hand can't easily reproduce.
+        """
+        if not self.llm.available or not hourly_summaries:
+            return None
+
+        blocks = []
+        for s_ in hourly_summaries:
+            label = s_["period_end"].astimezone(self.tz).strftime("%I %p").lstrip("0")
+            blocks.append(f"[{label}] {s_['content']}")
+        body = "\n\n".join(blocks)
+
+        system = _NEUTRALITY + " " + self._naming_rule()
+        user = (
+            f"{self._ctx(house_context)}"
+            "Below are the last day's hourly summaries from the Big Brother "
+            "house. Write the numbered 'things you need to know' list that a "
+            "feed-watcher would want before catching up today.\n\n"
+            "RULES:\n"
+            "- 5-8 numbered items, most important FIRST (not chronological).\n"
+            "- Each item is ONE punchy line stating where things STAND — the "
+            "current situation, targets, plans and shifts — not a play-by-play "
+            "of what happened when.\n"
+            "- Prefer state over story: 'Ashley is the renom plan', 'Yash is now "
+            "an early target', 'Mallory is realising Melody isn't in her "
+            "corner'.\n"
+            "- Mark anything unconfirmed as a plan or a read, never as fact.\n"
+            "- Do NOT list alliances — those are added separately below.\n"
+            "- No heading, no intro, no closing. Output ONLY the numbered lines."
+            f"\n\nSUMMARIES:\n\n{body}"
+        )
+        text = await self.llm.text(system, user, max_tokens=900, heavy=True)
+        if not text:
+            return None
+
+        parts = [sentence_clamp(drop_orphan_tail(strip_links(text)), 2200)]
+
+        # Alliance map — straight from the tracker, no LLM in the loop.
+        if alliances:
+            lines = []
+            for a in alliances[:8]:
+                members = "/".join(a["members"])
+                name = f"**{a['name']}** ({members})" if a.get("name") else f"**{members}**"
+                tags = []
+                if len(a["members"]) == 2:
+                    tags.append("duo")
+                note = one_sided_note(a)
+                if note:
+                    tags.append(f"⚠️ {note}")
+                if a.get("status") == "fracturing":
+                    tags.append("fracturing")
+                suffix = f" — _{', '.join(tags)}_" if tags else ""
+                lines.append(f"- {name}{suffix} · {a['confidence']:.0%}")
+            parts.append("**The alliance map**\n" + "\n".join(lines))
+
+        # Relationship beats — also straight from the tracker.
+        if relationships:
+            beats = []
+            for r in relationships[:6]:
+                label = r.get("label") or ""
+                if not label:
+                    continue
+                beats.append(f"- {r['hg_a']} & {r['hg_b']} — {label}")
+            if beats:
+                parts.append("**Where they stand**\n" + "\n".join(beats))
+
+        embed = discord.Embed(
+            title=f"Need to know — Day {day_number}",
+            description=sentence_clamp("\n\n".join(parts), 4000),
+            color=0x1D9E75, timestamp=datetime.now(self.tz),
+        )
+        embed.set_footer(text="Where the game stands right now")
         return embed
 
     # --- daily recap (map-reduce over stored hourly summaries) --------------

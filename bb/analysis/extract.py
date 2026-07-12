@@ -56,6 +56,12 @@ _SCHEMA = {
                                   "description": "True ONLY if the text shows the deal is not mutual — "
                                                  "one member trusts it while another is privately playing "
                                                  "or planning against them. Default false."},
+                    "one_sided_by": {"type": "array", "items": {"type": "string"},
+                                     "description": "If one_sided: the houseguest(s) who do NOT genuinely "
+                                                    "mean it — the ones privately playing the others. "
+                                                    "E.g. if Drew makes a final 2 with Melody but tells his "
+                                                    "real alliance it's fake, this is [\"Drew\"]. Must be "
+                                                    "members of this alliance."},
                     "status": {"type": "string",
                                "enum": ["forming", "active", "fracturing", "dissolved"]},
                     "confidence": {"type": "number",
@@ -179,7 +185,9 @@ class Extractor:
             "they are wavering, else 'leaning'.\n"
             "- Mark an alliance 'one_sided' ONLY when the text clearly shows the deal "
             "isn't mutual (one side trusts it while another schemes against them). When "
-            "in doubt, leave it false.\n"
+            "in doubt, leave it false. When you do mark it, ALWAYS fill 'one_sided_by' "
+            "with whoever is doing the playing — the deal being fake matters far less "
+            "than who is faking it.\n"
             "- A final-2 or final-3 deal IS an alliance — record it with just those two "
             "or three members; do not fold it into a larger group.\n"
             "- Return empty arrays rather than guessing."
@@ -236,6 +244,8 @@ class Extractor:
                 evidence=str(a.get("evidence", ""))[:500],
                 name=_clean_name(a.get("name")),
                 one_sided=bool(a.get("one_sided", False)),
+                one_sided_by=[m for m in self.roster.resolve_all(
+                    list(a.get("one_sided_by") or [])) if m in members],
                 source_hash=src(a),
             ))
 

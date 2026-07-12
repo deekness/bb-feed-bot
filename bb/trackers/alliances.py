@@ -116,10 +116,13 @@ class AllianceTracker:
         # Adopt a name if we just learned one.
         name = match["name"] or proposal.name
         one_sided = bool(match.get("one_sided")) or bool(getattr(proposal, "one_sided", False))
+        # Union the accusers: two updaters may each name a different faker.
+        by = list(dict.fromkeys(list(match.get("one_sided_by") or [])
+                                + list(getattr(proposal, "one_sided_by", []) or [])))
         await self.db.execute(
             "UPDATE alliances SET confidence = $1, status = $2, name = $3, "
-            "one_sided = $4 WHERE id = $5",
-            new_conf, status, name, one_sided, alliance_id,
+            "one_sided = $4, one_sided_by = $5 WHERE id = $6",
+            new_conf, status, name, one_sided, by, alliance_id,
         )
         # Merge any new members in.
         for hg in proposal.members:
@@ -132,7 +135,7 @@ class AllianceTracker:
     async def _best_match(self, members: list[str], name: str | None = None):
         rows = await self.db.fetch(
             """
-            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided,
+            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided, a.one_sided_by,
                    array_agg(m.houseguest) AS members
             FROM alliances a
             JOIN alliance_members m ON m.alliance_id = a.id AND m.active
@@ -163,10 +166,11 @@ class AllianceTracker:
     async def _create(self, proposal) -> None:
         status = "active" if proposal.confidence >= self.PROMOTE_AT else "forming"
         row = await self.db.fetchrow(
-            "INSERT INTO alliances (name, status, confidence, one_sided) "
-            "VALUES ($1, $2, $3, $4) RETURNING id",
+            "INSERT INTO alliances (name, status, confidence, one_sided, one_sided_by) "
+            "VALUES ($1, $2, $3, $4, $5) RETURNING id",
             proposal.name, status, proposal.confidence,
             bool(getattr(proposal, "one_sided", False)),
+            list(getattr(proposal, "one_sided_by", []) or []),
         )
         alliance_id = row["id"]
         for hg in proposal.members:
@@ -203,7 +207,7 @@ class AllianceTracker:
     async def active(self) -> list[dict]:
         rows = await self.db.fetch(
             """
-            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided,
+            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided, a.one_sided_by,
                    array_agg(m.houseguest ORDER BY m.houseguest) AS members
             FROM alliances a
             JOIN alliance_members m ON m.alliance_id = a.id AND m.active
@@ -217,7 +221,7 @@ class AllianceTracker:
     async def for_houseguest(self, name: str) -> list[dict]:
         rows = await self.db.fetch(
             """
-            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided,
+            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided, a.one_sided_by,
                    array_agg(m2.houseguest ORDER BY m2.houseguest) AS members
             FROM alliances a
             JOIN alliance_members m ON m.alliance_id = a.id AND m.active AND m.houseguest = $1
@@ -233,7 +237,7 @@ class AllianceTracker:
     async def detail(self, alliance_id: int) -> dict | None:
         row = await self.db.fetchrow(
             """
-            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided, a.first_seen,
+            SELECT a.id, a.name, a.status, a.confidence, a.locked, a.one_sided, a.one_sided_by, a.first_seen,
                    a.last_seen, array_agg(m.houseguest ORDER BY m.houseguest) AS members
             FROM alliances a
             JOIN alliance_members m ON m.alliance_id = a.id AND m.active

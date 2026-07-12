@@ -35,7 +35,10 @@ class AllianceProposal:
     confidence: float      # 0..1
     evidence: str
     name: str | None = None
-    one_sided: bool = False  # A believes in it but B is playing them (or vice-versa)
+    one_sided: bool = False  # the deal isn't mutual
+    # Canonical names of the member(s) who do NOT mean it — i.e. who are playing
+    # the others. Empty when one_sided is False.
+    one_sided_by: list[str] = field(default_factory=list)
     source_hash: str = ""  # content_hash of the update the evidence came from
 
 
