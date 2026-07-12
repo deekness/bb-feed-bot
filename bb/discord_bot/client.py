@@ -149,6 +149,20 @@ class BBBot(commands.Bot):
         ch = self.get_channel(int(cid))
         return ch if isinstance(ch, discord.TextChannel) else None
 
+    async def recap_channel(self) -> discord.TextChannel | None:
+        """Where the daily/weekly recaps go. Falls back to the main update
+        channel when RECAP_CHANNEL_ID (or /setrecapchannel) isn't set, so
+        behaviour is unchanged unless you opt in."""
+        cid = (await self.db.kv_get("recap_channel_id")
+               or self.settings.recap_channel_id)
+        if not cid:
+            return await self.update_channel()
+        ch = self.get_channel(int(cid))
+        if isinstance(ch, discord.TextChannel):
+            return ch
+        log.warning("recap channel %s not found — falling back to updates", cid)
+        return await self.update_channel()
+
     async def _merge_runtime_roster(self) -> None:
         """Re-apply roster changes made at runtime (/addhouseguest etc., stored
         in bot_kv) on top of season.yaml so they survive restarts. Order
@@ -797,7 +811,7 @@ class BBBot(commands.Bot):
                 log.info("daily decay dissolved %d alliances", dissolved)
             await self.relationships.decay()
 
-            channel = await self.update_channel()
+            channel = await self.recap_channel()
             if not channel:
                 return
 

@@ -88,6 +88,7 @@ class Settings:
     llm_model: str
     llm_model_recap: str
     update_channel_id: int | None
+    recap_channel_id: int | None
     owner_id: int | None
     timezone: str
     season_config_path: str
@@ -113,6 +114,7 @@ class Settings:
             llm_model=os.getenv("LLM_MODEL", "claude-haiku-4-5-20251001"),
             llm_model_recap=os.getenv("LLM_MODEL_RECAP", "").strip(),
             update_channel_id=opt_int("UPDATE_CHANNEL_ID"),
+            recap_channel_id=opt_int("RECAP_CHANNEL_ID"),
             owner_id=opt_int("OWNER_ID"),
             timezone=os.getenv("TIMEZONE", "US/Pacific"),
             season_config_path=os.getenv("SEASON_CONFIG", "season.yaml"),

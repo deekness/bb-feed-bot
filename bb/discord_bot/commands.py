@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /status,
+        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /status,
         /testdm
 Owner:  /sync
 
@@ -547,14 +547,39 @@ class BBCommands(commands.Cog):
         await self.bot.db.kv_set("update_channel_id", channel.id)
         await interaction.response.send_message(f"Posts will go to {channel.mention}.", ephemeral=True)
 
+    @app_commands.command(
+        name="setrecapchannel",
+        description="(Admin) Send daily/weekly recaps to a different channel.")
+    @app_commands.describe(channel="Where recaps go. Omit to send them back to the main channel.")
+    async def setrecapchannel(self, interaction: discord.Interaction,
+                              channel: discord.TextChannel | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        if channel is None:
+            await self.bot.db.kv_set("recap_channel_id", None)
+            await interaction.response.send_message(
+                "Recaps will post in the main update channel again.", ephemeral=True)
+            return
+        await self.bot.db.kv_set("recap_channel_id", channel.id)
+        await interaction.response.send_message(
+            f"📅 Daily & weekly recaps will now post in {channel.mention}. "
+            "Everything else (hourly summaries, 🚨 Breaking, feed state) stays in "
+            "the main channel.", ephemeral=True)
+
     @app_commands.command(name="status", description="(Admin) Show bot status.")
     async def status(self, interaction: discord.Interaction):
         if not self.bot.is_admin(interaction):
             await interaction.response.send_message("Admins only.", ephemeral=True)
             return
         channel = await self.bot.update_channel()
+        rchannel = await self.bot.recap_channel()
         recent = await self.bot.db.recent_updates(1)
         embed = discord.Embed(title="Bot Status", color=0x2ECC71)
+        chans = f"updates: {channel.mention if channel else '—'}"
+        if rchannel and channel and rchannel.id != channel.id:
+            chans += f"\nrecaps: {rchannel.mention}"
+        embed.add_field(name="Channels", value=chans, inline=False)
         embed.add_field(name="Season", value=f"{self.bot.season.name} (week {self.bot.game_state.current_week()})", inline=False)
         embed.add_field(name="Roster", value=f"{len(self.bot.roster.names)} houseguests", inline=True)
         if self.bot.llm.available:
