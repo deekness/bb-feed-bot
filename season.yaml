@@ -31,8 +31,11 @@ rss_fallback_urls: []
 # to the source. {url} is replaced with the URL-encoded feed address.
 rss_proxy_templates:
   - "https://api.allorigins.win/raw?url={url}"
-  - "https://corsproxy.io/?url={url}"
   - "https://api.codetabs.com/v1/proxy/?quest={url}"
+  - "https://corsproxy.io/?url={url}"
+  - "https://api.cors.lol/?url={url}"
+  - "https://thingproxy.freeboard.io/fetch/{url}"
+  - "https://r.jina.ai/{url}"
 
 # ----------------------------------------------------------------------------
 # ROSTER — the heart of the system.
