@@ -190,6 +190,13 @@ class Extractor:
             "than who is faking it.\n"
             "- A final-2 or final-3 deal IS an alliance — record it with just those two "
             "or three members; do not fold it into a larger group.\n"
+            "- NAMES: only set 'name' when the members you are listing are the ones "
+            "who call THEMSELVES that. Houseguests constantly discuss OTHER "
+            "people's alliances — if Drew and Devens are talking about a group "
+            "called 'The Red Corner', that name belongs to the group they are "
+            "TALKING ABOUT, not to Drew and Devens. Attributing an overheard name "
+            "to the speakers is a serious error: leave 'name' null unless the "
+            "members are clearly naming their own alliance.\n"
             "- Return empty arrays rather than guessing."
         )
         if episode_airing:

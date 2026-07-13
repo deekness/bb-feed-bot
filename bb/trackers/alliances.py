@@ -114,7 +114,13 @@ class AllianceTracker:
         if proposal.status in ("fracturing", "dissolved"):
             status = proposal.status
         # Adopt a name if we just learned one.
-        name = match["name"] or proposal.name
+        name = match["name"]
+        if not name and proposal.name:
+            if await self._name_taken_by_other(proposal.name, alliance_id):
+                log.info("not adopting name %r for #%s — another alliance owns it",
+                         proposal.name, alliance_id)
+            else:
+                name = proposal.name
         one_sided = bool(match.get("one_sided")) or bool(getattr(proposal, "one_sided", False))
         # Union the accusers: two updaters may each name a different faker.
         by = list(dict.fromkeys(list(match.get("one_sided_by") or [])
@@ -163,12 +169,29 @@ class AllianceTracker:
                 best, best_j = r, j
         return best
 
+    async def _name_taken_by_other(self, name: str, alliance_id: int | None) -> bool:
+        """Is this name already on a DIFFERENT alliance? Houseguests discuss each
+        other's alliances constantly, so an overheard name can otherwise get
+        stapled onto the wrong group — the speakers rather than the members."""
+        if not name:
+            return False
+        row = await self.db.fetchval(
+            "SELECT id FROM alliances WHERE lower(name) = lower($1) "
+            "AND ($2::int IS NULL OR id <> $2) LIMIT 1",
+            name, alliance_id)
+        return row is not None
+
     async def _create(self, proposal) -> None:
         status = "active" if proposal.confidence >= self.PROMOTE_AT else "forming"
+        pname = proposal.name
+        if pname and await self._name_taken_by_other(pname, None):
+            log.info("alliance name %r already belongs to another group — "
+                     "creating unnamed instead", pname)
+            pname = None
         row = await self.db.fetchrow(
             "INSERT INTO alliances (name, status, confidence, one_sided, one_sided_by) "
             "VALUES ($1, $2, $3, $4, $5) RETURNING id",
-            proposal.name, status, proposal.confidence,
+            pname, status, proposal.confidence,
             bool(getattr(proposal, "one_sided", False)),
             list(getattr(proposal, "one_sided_by", []) or []),
         )
@@ -268,6 +291,12 @@ class AllianceTracker:
             alliance_id,
         )
         return _rowcount(result) > 0
+
+    async def rename(self, alliance_id: int, name: str | None) -> bool:
+        """Set or clear an alliance's name by hand (fixes a misattributed one)."""
+        res = await self.db.execute(
+            "UPDATE alliances SET name = $1 WHERE id = $2", name, alliance_id)
+        return res.endswith("1")
 
     async def unlock(self, alliance_id: int) -> bool:
         """Hand an alliance back to the tracker: confidence, promotion, decay and

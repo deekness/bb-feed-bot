@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
+        /rejectalliance, /namealliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -100,6 +100,9 @@ class BBCommands(commands.Cog):
     async def alliances(self, interaction: discord.Interaction):
         await interaction.response.defer()
         rows = await self.bot.alliances.active()
+        # IDs are admin plumbing (/confirmalliance takes one). They mean nothing
+        # to everyone else, so they only render for admins.
+        show_id = self.bot.is_admin(interaction)
         embed = discord.Embed(title="🤝 Tracked Alliances",
                               color=0x3498DB, timestamp=discord.utils.utcnow())
         if not rows:
@@ -109,12 +112,14 @@ class BBCommands(commands.Cog):
             weak = [a for a in rows if a not in strong]
             if strong:
                 embed.add_field(name="Established", inline=False, value="\n".join(
-                    self._fmt_alliance(a) for a in strong[:8]))
+                    self._fmt_alliance(a, show_id) for a in strong[:8]))
             if weak:
                 embed.add_field(name="Suspected", inline=False, value="\n".join(
-                    self._fmt_alliance(a) for a in weak[:6]))
-            embed.set_footer(text="Confidence rises with corroboration and decays without it. "
-                                  "Admins can /confirmalliance or /rejectalliance.")
+                    self._fmt_alliance(a, show_id) for a in weak[:6]))
+            foot = "Confidence rises with corroboration and decays without it."
+            if show_id:
+                foot += " Admins can /confirmalliance or /rejectalliance."
+            embed.set_footer(text=foot)
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="alliance", description="One alliance's details and the evidence behind it.")
@@ -427,6 +432,26 @@ class BBCommands(commands.Cog):
         await interaction.response.send_message(
             f"{'✅ Confirmed' if ok else '❌ Not found'}: alliance #{alliance_id}", ephemeral=True)
 
+    @app_commands.command(name="namealliance",
+                          description="(Admin) Set or clear an alliance's name.")
+    @app_commands.describe(alliance_id="The #id shown in /alliances (admins see these)",
+                           name="The alliance's name. Leave empty to clear a wrong one.")
+    async def namealliance(self, interaction: discord.Interaction,
+                           alliance_id: int, name: str | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        clean = (name or "").strip()[:60] or None
+        ok = await self.bot.alliances.rename(alliance_id, clean)
+        if not ok:
+            await interaction.response.send_message(
+                f"No alliance #{alliance_id}.", ephemeral=True)
+            return
+        msg = (f"✏️ Alliance #{alliance_id} is now **{clean}**." if clean
+               else f"✏️ Cleared the name on alliance #{alliance_id} — it'll show "
+                    "by members until the feeds reveal a real one.")
+        await interaction.response.send_message(msg, ephemeral=True)
+
     @app_commands.command(name="unlockalliance",
                           description="(Admin) Hand an alliance back to automatic tracking.")
     @app_commands.describe(alliance_id="The #id shown in /alliances")
@@ -679,7 +704,7 @@ class BBCommands(commands.Cog):
         await interaction.followup.send(f"Synced {len(synced)} commands.", ephemeral=True)
 
     @staticmethod
-    def _fmt_alliance(a: dict) -> str:
+    def _fmt_alliance(a: dict, show_id: bool = True) -> str:
         lock = "🔒 " if a["locked"] else ""
         name = a["name"] or "/".join(a["members"])
         members = ", ".join(a["members"])
@@ -690,4 +715,5 @@ class BBCommands(commands.Cog):
         if note:
             tags.append(f"⚠️ {note}")
         suffix = f"  _{' · '.join(tags)}_" if tags else ""
-        return f"{lock}**#{a['id']} {name}** — {members}  ({a['confidence']:.0%}){suffix}"
+        tag = f"#{a['id']} " if show_id else ""
+        return f"{lock}**{tag}{name}** — {members}  ({a['confidence']:.0%}){suffix}"
