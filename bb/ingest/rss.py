@@ -56,7 +56,12 @@ class RSSSource:
 
     def __init__(self, url: str, timeout: int = 20,
                  fallback_urls: list[str] | None = None,
-                 proxy_templates: list[str] | None = None):
+                 proxy_templates: list[str] | None = None,
+                 name: str | None = None):
+        # Distinct name per feed so several RSS sources can run side by side and
+        # stay attributable in the archive.
+        if name:
+            self.name = name
         self.urls = [url] + list(fallback_urls or [])
         self.proxy_templates = list(proxy_templates or [])
         self.timeout = timeout
@@ -72,7 +77,10 @@ class RSSSource:
         primary = self.urls[0]
         for tpl in self.proxy_templates:
             try:
-                proxied = tpl.replace("{url}", quote(primary, safe=""))
+                # r.jina.ai takes the target appended raw; percent-encoding it
+                # returns HTTP 422. Everything else wants it encoded.
+                target = primary if "{url_raw}" in tpl else quote(primary, safe="")
+                proxied = tpl.replace("{url_raw}", primary).replace("{url}", target)
             except Exception:
                 continue
             out.append((f"proxy:{tpl.split('/')[2]}", proxied, True))

@@ -98,7 +98,18 @@ class BBBot(commands.Bot):
             season.rss_url,
             fallback_urls=season.rss_fallback_urls,
             proxy_templates=season.rss_proxy_templates)
-        sources = [self.rss_source,
+        # Independent second sources. Jokers is the richest feed but its host
+        # intermittently refuses datacenter IPs, so a genuinely separate site
+        # (different host, different IP) keeps the pipeline fed when it drops —
+        # unlike hostname "fallbacks", which all resolved to the same machine.
+        extra = [
+            RSSSource(f["url"], name=f.get("name", "rss2"),
+                      proxy_templates=season.rss_proxy_templates)
+            for f in season.extra_rss_feeds if f.get("url")
+        ]
+        for e in extra:
+            log.info("extra RSS source: %s", e.name)
+        sources = [self.rss_source, *extra,
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
         self.pipeline = IngestPipeline(self.db, sources)

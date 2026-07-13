@@ -34,8 +34,18 @@ rss_proxy_templates:
   - "https://api.codetabs.com/v1/proxy/?quest={url}"
   - "https://corsproxy.io/?url={url}"
   - "https://api.cors.lol/?url={url}"
-  - "https://thingproxy.freeboard.io/fetch/{url}"
-  - "https://r.jina.ai/{url}"
+  # r.jina.ai takes the target URL appended RAW — percent-encoding it returns 422.
+  - "https://r.jina.ai/{url_raw}"
+  # (thingproxy.freeboard.io removed: the host no longer resolves.)
+
+# A genuinely INDEPENDENT source — different site, different host, different IP.
+# Jokers is richer and more granular, but its server intermittently refuses
+# datacenter traffic; when that happens this keeps real house updates flowing.
+# OnlineBigBrother posts fewer, longer items with near-transcript dialogue,
+# which is excellent for alliance/relationship extraction.
+extra_rss_feeds:
+  - name: "onlinebb"
+    url: "https://www.onlinebigbrother.com/feed/"
 
 # ----------------------------------------------------------------------------
 # ROSTER — the heart of the system.
