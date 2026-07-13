@@ -554,6 +554,11 @@ class BBBot(commands.Bot):
         return await self.summarizer.episode_recap(updates, label, context)
 
     async def _maybe_post_episode_recap(self) -> None:
+        # Auto-posting is OFF by default — the episode recap is long and
+        # duplicates the daily recap. /episoderecap still generates one on
+        # demand. Flip episode_recap_enabled in season.yaml to bring it back.
+        if not self.season.episode_recap_enabled:
+            return
         """Auto-post an episode recap once the episode window + buffer has
         elapsed. State in bot_kv (last recapped key) makes it fire exactly once
         and survive restarts; a long outage self-heals (fires late, not never)."""
