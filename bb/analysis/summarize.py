@@ -103,29 +103,46 @@ def strip_links(text: str) -> str:
 
 def drop_orphan_tail(text: str) -> str:
     """Remove a trailing fragment the MODEL left unfinished (token limit hit
-    mid-write), e.g. a dangling '- Rome and Lala' or a lone '- Y'. A final line
-    is dropped when it is a bullet with no sentence-ending punctuation and is
-    either very short or clearly cut off. Never touches a completed line."""
-    lines = text.rstrip().split("\n")
-    while lines:
-        last = lines[-1].strip()
-        if not last:
-            lines.pop()
-            continue
-        is_bullet = last.startswith(("-", "•", "*"))
-        body = last.lstrip("-•* ").strip()
-        finished = body.endswith((".", "!", "?", '"', "”", ")"))
-        # a bold header left dangling at the end is also an orphan
-        is_header = body.startswith("**") and body.endswith("**")
-        if is_bullet and not finished and (len(body) < 45 or not body.endswith((".",))):
-            lines.pop()
-            continue
-        if is_header:
-            lines.pop()
-            continue
-        break
-    return "\n".join(lines).rstrip()
+    mid-write), e.g. a dangling '- Rome and Lala' or a lone '- Y'.
 
+    Only the FINAL line is ever considered, and only when it is clearly a
+    truncation: short and unpunctuated, or a header left with nothing under it.
+
+    The old version looped, popping every bullet that didn't end in a period —
+    which is most bullets — and so deleted entire hourly digests, posting a
+    blank embed over 70 real updates. A cleaner must never be able to empty its
+    own input: if the result would be blank, the original is returned.
+    """
+    original = text
+    lines = text.rstrip().split("\n")
+
+    # 1) trailing blank lines
+    while lines and not lines[-1].strip():
+        lines.pop()
+    if not lines:
+        return original
+
+    def is_header(b: str) -> bool:
+        return b.startswith("**") and b.endswith("**")
+
+    last = lines[-1].strip()
+    body = last.lstrip("-•* ").strip()
+    is_bullet = last.startswith(("-", "•", "*"))
+    finished = body.endswith((".", "!", "?", '"', "”", ")", "*"))
+
+    # 2) a short, unpunctuated final bullet is a cut-off fragment.
+    #    A LONG unpunctuated bullet is just a normal bullet — leave it alone.
+    if is_bullet and not finished and len(body) < 25:
+        lines.pop()
+
+    # 3) a header dangling at the very end with no content under it
+    while lines and is_header(lines[-1].strip()):
+        lines.pop()
+        while lines and not lines[-1].strip():
+            lines.pop()
+
+    out = "\n".join(lines).rstrip()
+    return out if out.strip() else original
 
 def sentence_clamp(text: str, limit: int) -> str:
     """Fit text into `limit` chars without ever cutting mid-sentence. Prefers
@@ -617,9 +634,18 @@ class Summarizer:
         text = await self.llm.text(system, user, max_tokens=1600)
         if not text:
             return None
+        # Belt and braces: if the cleaners somehow reduce real model output to
+        # nothing, fall back to the raw text rather than posting a blank embed
+        # over a busy hour. (A bug in drop_orphan_tail once did exactly that.)
+        desc = sentence_clamp(drop_orphan_tail(strip_links(text)), 4000)
+        if not desc.strip():
+            log.warning("hourly digest cleaned to empty — using raw model text")
+            desc = strip_links(text).strip()[:4000]
+        if not desc.strip():
+            return None
         embed = discord.Embed(
             title=f"House Summary — {hour_label}",
-            description=sentence_clamp(drop_orphan_tail(strip_links(text)), 4000),
+            description=desc,
             color=0x5865F2, timestamp=datetime.now(self.tz),
         )
         embed.set_footer(text=f"{len(updates)} updates this hour")

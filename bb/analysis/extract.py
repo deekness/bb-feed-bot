@@ -252,7 +252,12 @@ class Extractor:
                 pass
             return updates[0].content_hash if updates else ""
 
-        for a in data.get("alliances", []) or []:
+        _alliances = data.get("alliances") or []
+        if not isinstance(_alliances, list):
+            log.warning("extraction: alliances was %s, not a list — skipping",
+                        type(_alliances).__name__)
+            _alliances = []
+        for a in _alliances:
             if not isinstance(a, dict):
                 log.warning("extraction: skipping non-object alliance %r", a)
                 continue
@@ -271,7 +276,12 @@ class Extractor:
                 source_hash=src(a),
             ))
 
-        for r in data.get("relationship_changes", []) or []:
+        _relationship_changes = data.get("relationship_changes") or []
+        if not isinstance(_relationship_changes, list):
+            log.warning("extraction: relationship_changes was %s, not a list — skipping",
+                        type(_relationship_changes).__name__)
+            _relationship_changes = []
+        for r in _relationship_changes:
             if not isinstance(r, dict):
                 log.warning("extraction: skipping non-object relationship %r", r)
                 continue
@@ -283,7 +293,12 @@ class Extractor:
                 evidence=str(r.get("evidence", ""))[:500],
             ))
 
-        for g in data.get("game_state", []) or []:
+        _game_state = data.get("game_state") or []
+        if not isinstance(_game_state, list):
+            log.warning("extraction: game_state was %s, not a list — skipping",
+                        type(_game_state).__name__)
+            _game_state = []
+        for g in _game_state:
             if not isinstance(g, dict):
                 log.warning("extraction: skipping non-object game event %r", g)
                 continue
@@ -297,7 +312,12 @@ class Extractor:
                 source_hash=src(g),
             ))
 
-        for v in data.get("vote_plans", []) or []:
+        _vote_plans = data.get("vote_plans") or []
+        if not isinstance(_vote_plans, list):
+            log.warning("extraction: vote_plans was %s, not a list — skipping",
+                        type(_vote_plans).__name__)
+            _vote_plans = []
+        for v in _vote_plans:
             if not isinstance(v, dict):
                 log.warning("extraction: skipping non-object vote plan %r", v)
                 continue
