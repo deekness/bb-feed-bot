@@ -17,6 +17,13 @@ house_day_one: "2026-07-07"
 # Live-feed updates RSS feed (Jokers Updates).
 rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 
+# Jokers is polled every 10 minutes, NOT every 2. The feed holds ~70 items and
+# the house produces an update every 2-3 min at peak, so there is over two hours
+# of buffer — a 10-minute poll loses nothing, while cutting requests from ~720 to
+# ~144/day. The old rate was almost certainly what tripped their datacenter-IP
+# blocks. Bluesky still polls every 2 minutes, so breaking news is unaffected.
+rss_poll_interval_s: 600
+
 # Tried in order if the primary refuses the connection. The rss.* host has been
 # seen to drop TCP connections from Railway while the site itself is up.
 # NOTE: rss./forums./www.jokersupdates.com all resolve to the SAME IP
@@ -84,7 +91,6 @@ nicknames:
   la trice: LaTrice
   rick: Devens
   rick devens: Devens
-  ang: Angela
   # kat: Katherine
   # vinny: Vince
 

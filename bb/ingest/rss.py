@@ -30,6 +30,8 @@ def _clean_html(text: str) -> str:
 
 # Some hosts refuse connections from datacenter IPs or from clients with no
 # User-Agent. Present as a normal browser.
+# Some hosts refuse connections from datacenter IPs or from clients with no
+# User-Agent. Present as a normal browser.
 _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
@@ -57,7 +59,8 @@ class RSSSource:
     def __init__(self, url: str, timeout: int = 20,
                  fallback_urls: list[str] | None = None,
                  proxy_templates: list[str] | None = None,
-                 name: str | None = None):
+                 name: str | None = None,
+                 poll_interval_s: int = 0):
         # Distinct name per feed so several RSS sources can run side by side and
         # stay attributable in the archive.
         if name:
@@ -68,6 +71,14 @@ class RSSSource:
         self.consecutive_failures = 0   # read by the bot for source-health alerts
         self.using_proxy = False        # surfaced in /status
         self._active_url = url
+        self.poll_interval_s = poll_interval_s
+        # Conditional-GET validators. RSS is built for this and the bot should
+        # always have used it: if the feed hasn't changed the server replies
+        # 304 Not Modified with an EMPTY body — no re-download of ~70 items,
+        # near-zero cost to them, and far less like a scraper.
+        self._etag: str | None = None
+        self._last_modified: str | None = None
+        self.not_modified_count = 0     # how often 304 saved a full download
 
     def _candidates(self) -> list[tuple[str, str, bool]]:
         """(label, url, is_proxy) — direct first, proxied only as a fallback."""
@@ -91,12 +102,33 @@ class RSSSource:
         errors: list[str] = []
         async with aiohttp.ClientSession(headers={"User-Agent": _UA}) as session:
             for label, url, is_proxy in self._candidates():
+                # Only send validators on a DIRECT fetch — a proxy's 304 refers
+                # to the proxy's own cache, not the origin feed, and its ETag is
+                # not the origin's.
+                headers = {}
+                if not is_proxy:
+                    if self._etag:
+                        headers["If-None-Match"] = self._etag
+                    if self._last_modified:
+                        headers["If-Modified-Since"] = self._last_modified
                 try:
-                    async with session.get(url, timeout=self.timeout) as resp:
+                    async with session.get(url, timeout=self.timeout,
+                                           headers=headers) as resp:
+                        if resp.status == 304:
+                            # Feed unchanged since our last poll. Nothing to do,
+                            # and we downloaded nothing.
+                            self.not_modified_count += 1
+                            self.consecutive_failures = 0
+                            self.using_proxy = False
+                            log.debug("%s: 304 Not Modified", self.name)
+                            return []
                         if resp.status != 200:
                             errors.append(f"{label} -> HTTP {resp.status}")
                             continue
                         body = await resp.read()
+                        if not is_proxy:
+                            self._etag = resp.headers.get("ETag")
+                            self._last_modified = resp.headers.get("Last-Modified")
                     # A proxy can return 200 with an error page instead of the
                     # feed, so require it to actually look like RSS/XML.
                     if b"<rss" not in body[:600] and b"<?xml" not in body[:600]:

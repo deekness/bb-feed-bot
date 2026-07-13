@@ -674,6 +674,12 @@ class BBCommands(commands.Cog):
                 rss_val = "🔁 via proxy (Jokers blocks cloud IPs)"
             else:
                 rss_val = "✅ direct"
+            every = getattr(rss, "poll_interval_s", 0)
+            if every:
+                rss_val += f"\npolled every {every // 60}m"
+            nm = getattr(rss, "not_modified_count", 0)
+            if nm:
+                rss_val += f"\n{nm} × 304 (no re-download)"
             embed.add_field(name="Jokers RSS", value=rss_val, inline=True)
         import datetime as _dt
         now = _dt.datetime.now(self.bot.tz)
