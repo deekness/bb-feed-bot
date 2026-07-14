@@ -24,6 +24,10 @@ rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 # blocks. Bluesky still polls every 2 minutes, so breaking news is unaffected.
 rss_poll_interval_s: 600
 
+# "Feeds are back" posts for short blips are noise, especially overnight.
+# Outages shorter than this (in minutes) are tracked but not announced.
+feeds_back_min_minutes: 20
+
 # Tried in order if the primary refuses the connection. The rss.* host has been
 # seen to drop TCP connections from Railway while the site itself is up.
 # NOTE: rss./forums./www.jokersupdates.com all resolve to the SAME IP
@@ -91,8 +95,6 @@ nicknames:
   la trice: LaTrice
   rick: Devens
   rick devens: Devens
-  ang: Angela
-  thog: Haley
   # kat: Katherine
   # vinny: Vince
 

@@ -55,6 +55,7 @@ class Season:
     extra_rss_feeds: list = field(default_factory=list)
     episode_recap_enabled: bool = False   # auto-post after each episode
     rss_poll_interval_s: int = 600        # Jokers cadence (Bluesky stays 2min)
+    feeds_back_min_minutes: int = 20      # suppress 'feeds are back' below this
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -80,6 +81,7 @@ class Season:
             extra_rss_feeds=list(data.get("extra_rss_feeds") or []),
             episode_recap_enabled=bool(data.get("episode_recap_enabled", False)),
             rss_poll_interval_s=int(data.get("rss_poll_interval_s", 600)),
+            feeds_back_min_minutes=int(data.get("feeds_back_min_minutes", 20)),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],

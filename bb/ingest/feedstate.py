@@ -70,6 +70,25 @@ def duration_in(text: str) -> str | None:
     return m.group(1).strip() if m else None
 
 
+_HOURS = re.compile(r"(\d+)\s*(?:hours?|hrs?|h)\b", re.IGNORECASE)
+_MINS = re.compile(r"(\d+)\s*(?:minutes?|mins?|m)\b", re.IGNORECASE)
+
+
+def duration_minutes(text: str) -> int | None:
+    """The outage length in whole minutes, or None if the post doesn't say.
+
+    Handles the shapes the upstream account actually posts: "7 mins",
+    "1 hour 8 mins", "2 hours", "45 minutes".
+    """
+    raw = duration_in(text)
+    if not raw:
+        return None
+    hours = sum(int(h) for h in _HOURS.findall(raw))
+    mins = sum(int(m) for m in _MINS.findall(raw))
+    total = hours * 60 + mins
+    return total if total > 0 else None
+
+
 class FeedStateMonitor:
     def __init__(self, handle: str):
         self.handle = handle

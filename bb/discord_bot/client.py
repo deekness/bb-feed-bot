@@ -30,7 +30,8 @@ from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
-                                FeedStateMonitor, duration_in, strip_hashtags)
+                                FeedStateMonitor, duration_in,
+                                duration_minutes, strip_hashtags)
 from ..ingest.pipeline import IngestPipeline
 from ..ingest.rss import RSSSource
 from ..llm import LLM
@@ -473,6 +474,18 @@ class BBBot(commands.Bot):
         })
         if not fresh:
             return
+
+        # Short blips are noise, especially overnight — a 7-minute WBRB isn't
+        # news. Suppress "feeds are back" below the threshold; the state is
+        # still recorded above, so /feeds stays accurate.
+        if sig["state"] == STATE_LIVE:
+            mins = duration_minutes(sig["text"])
+            floor = self.season.feeds_back_min_minutes
+            if mins is not None and mins < floor:
+                log.info("suppressing feeds-back relay (%dm outage, floor %dm)",
+                         mins, floor)
+                return
+
         channel = await self.feeds_channel()
         if not channel:
             return
