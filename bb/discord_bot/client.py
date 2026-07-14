@@ -208,6 +208,30 @@ class BBBot(commands.Bot):
         log.warning("briefing channel %s not found — falling back", cid)
         return await self.recap_channel()
 
+    async def wtf_updates(self, target_hours: int = 8, min_updates: int = 40,
+                          max_hours: int = 24):
+        """Updates for /wtf, with a window that adapts to house activity.
+
+        A hybrid catch-up/pulse: aim for a tight recent window (default 8h) so a
+        busy afternoon reads as "right now", but Big Brother has dead zones —
+        the house sleeps, feeds black out for comps — and a fixed short window
+        then returns almost nothing. So widen until there are enough updates to
+        say something real, capping at max_hours. Returns (updates, window_hours,
+        recent_count) — recent_count = updates in the ORIGINAL target window,
+        which tells the caller how live things actually are.
+        """
+        recent = await self.db.recent_updates(target_hours)
+        recent_count = len(recent)
+        if recent_count >= min_updates:
+            return recent, target_hours, recent_count
+        # too sparse — widen
+        hours = target_hours
+        updates = recent
+        while hours < max_hours and len(updates) < min_updates:
+            hours = min(max_hours, hours * 2)
+            updates = await self.db.recent_updates(hours)
+        return updates, hours, recent_count
+
     async def build_briefing(self):
         """Assemble the "need to know" brief from the last 24h + tracked state."""
         now_house = dt.datetime.now(self.house_tz)

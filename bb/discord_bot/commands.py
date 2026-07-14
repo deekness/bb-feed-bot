@@ -79,9 +79,10 @@ class BBCommands(commands.Cog):
     @app_commands.command(name="wtf", description="What's happening in the house right now?")
     async def wtf(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        updates = await self.bot.db.recent_updates(24)
+        updates, window_h, recent_count = await self.bot.wtf_updates()
         context = await self.bot.house_context()
-        embed = await self.bot.summarizer.whats_happening(updates, context)
+        embed = await self.bot.summarizer.whats_happening(
+            updates, context, window_hours=window_h, recent_count=recent_count)
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="summary", description="Summarize the last N hours (default 24).")

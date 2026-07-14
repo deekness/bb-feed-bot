@@ -92,6 +92,17 @@ def one_sided_note(a: dict) -> str:
     return f"{'/'.join(by)} isn't real on it"
 
 
+def _wtf_footer(total: int, window_hours: int) -> str:
+    """Honest footer: reflect the window actually used, not a hardcoded 24h."""
+    if window_hours >= 24:
+        span = "24h"
+    elif window_hours == 1:
+        span = "hour"
+    else:
+        span = f"{window_hours}h"
+    return f"Based on {total} updates in the last {span}"
+
+
 def strip_links(text: str) -> str:
     """Remove markdown links (keeping their label) and bare URLs. Bot outputs
     are link-free by policy; raw update texts can carry URLs and the LLM will
@@ -288,7 +299,9 @@ class Summarizer:
 
     # --- on-demand "what's happening" --------------------------------------
     async def whats_happening(self, updates: list[Update],
-                              house_context: str = "") -> discord.Embed:
+                              house_context: str = "",
+                              window_hours: int = 24,
+                              recent_count: int | None = None) -> discord.Embed:
         if not updates:
             return discord.Embed(
                 title="Nothing's happening",
@@ -297,10 +310,11 @@ class Summarizer:
             )
         top = sorted(updates, key=importance, reverse=True)[:15]
         if self.llm.available:
-            embed = await self._llm_whats_happening(top, len(updates), house_context)
+            embed = await self._llm_whats_happening(
+                top, len(updates), house_context, window_hours)
             if embed:
                 return embed
-        return self._pattern_whats_happening(top[:5], len(updates))
+        return self._pattern_whats_happening(top[:5], len(updates), window_hours)
 
     # --- breaking alert (LLM-gated; discussion must NOT fire) ---------------
     async def breaking(self, update: Update, house_context: str = "",
@@ -652,14 +666,20 @@ class Summarizer:
         return embed
 
     async def _llm_whats_happening(self, top: list[Update], total: int,
-                                   house_context: str) -> discord.Embed | None:
+                                   house_context: str,
+                                   window_hours: int = 24) -> discord.Embed | None:
         body = "\n".join(f"- {u.text}" for u in top)
-        system = _NEUTRALITY + " You are catching someone up after a day away."
+        system = (_NEUTRALITY + " Someone is checking in on the house — maybe "
+                  "catching up after a few hours away, maybe just seeing what's "
+                  "live right now. Serve both.")
         user = (
             f"{self._ctx(house_context)}"
-            "From these recent updates, give the 5 most important current happenings "
-            "as short bullet points (one sentence each), then a one-line overall "
-            f"summary. Updates:\n\n{body}"
+            "From these updates (newest first), give the 5 most important things "
+            "as short bullets (one sentence each), then a one-line summary.\n"
+            "Lead with what's happening NOW or still unresolved; fold older "
+            "threads in only if they're still live. Favour the most recent "
+            "developments over things that have already settled.\n\n"
+            f"UPDATES:\n\n{body}"
         )
         text = await self.llm.text(system, user, max_tokens=1200)
         if not text:
@@ -669,7 +689,7 @@ class Summarizer:
             description=sentence_clamp(drop_orphan_tail(strip_links(text)), 4000),
             color=0xFF6B35, timestamp=datetime.now(self.tz),
         )
-        embed.set_footer(text=f"Based on {total} updates in the last 24h")
+        embed.set_footer(text=_wtf_footer(total, window_hours))
         return embed
 
     @staticmethod
@@ -690,14 +710,15 @@ class Summarizer:
         embed.set_footer(text=f"{len(updates)} updates this hour")
         return embed
 
-    def _pattern_whats_happening(self, top: list[Update], total: int) -> discord.Embed:
+    def _pattern_whats_happening(self, top: list[Update], total: int,
+                                 window_hours: int = 24) -> discord.Embed:
         items = [f"{i}. {self._clean_item(u)}" for i, u in enumerate(top, 1)]
         embed = discord.Embed(
             title="What's happening right now",
             description="\n".join(fit_whole_items(items, 3900)), color=0xFF6B35,
             timestamp=datetime.now(self.tz),
         )
-        embed.set_footer(text=f"Based on {total} updates in the last 24h")
+        embed.set_footer(text=_wtf_footer(total, window_hours))
         return embed
 
     @staticmethod
