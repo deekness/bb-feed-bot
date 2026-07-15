@@ -306,7 +306,7 @@ class BBCommands(commands.Cog):
                            else f"HOH {hoh} breaks it (no stated lean)"))
                 lines.append("\u200b")   # breathing room between scenario cards
                 embed.add_field(
-                    name=f"{digits[i]}  {saved} escapes  →  {pair[0]} vs {pair[1]}",
+                    name=f"{digits[i]}  {saved} wins Block Buster  →  {pair[0]} vs {pair[1]}",
                     value="\n".join(lines), inline=False)
             embed.set_footer(text="Ranked plans: a voter's fallback counts when their first "
                                   "choice escapes. HOH votes only on a tie. "
