@@ -209,7 +209,12 @@ class BBCommands(commands.Cog):
         if state.get("have_not"):
             lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
         if state.get("nominee"):
-            lines.append(f"🪑 **Nominated**  {', '.join(state['nominee'])}")
+            saved = set(state.get("veto_used_on", []))
+            # Saved noms go to the END, struck through — at a glance the line
+            # reads as who is still in danger, not nomination history.
+            still = [n for n in state["nominee"] if n not in saved]
+            off = [f"~~{n}~~" for n in state["nominee"] if n in saved]
+            lines.append(f"🪑 **Nominated**  {', '.join(still + off)}")
         # Veto: one line telling the whole story instead of two redundant fields.
         vw = state.get("veto_winner", [])
         vu = state.get("veto_used_on", [])
