@@ -17,7 +17,7 @@ _MIN_CONFIDENCE = 0.6  # ignore low-confidence game-state guesses
 
 # Insertion order within a batch: prerequisites land before the roles that
 # depend on them, so a single update reporting a full veto ceremony still works.
-_ROLE_ORDER = {"hoh": 0, "nominee": 1, "veto_winner": 2, "veto_used_on": 3,
+_ROLE_ORDER = {"hoh": 0, "have_not": 1, "nominee": 1, "veto_winner": 2, "veto_used_on": 3,
                "replacement_nominee": 4, "evicted": 5}
 
 # Causal prerequisites. In Big Brother a replacement nominee CANNOT exist unless

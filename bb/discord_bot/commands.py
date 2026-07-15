@@ -176,6 +176,15 @@ class BBCommands(commands.Cog):
             embed.description = "\n".join(lines)
         await interaction.followup.send(embed=embed)
 
+    @staticmethod
+    def current_block(state: dict) -> list[str]:
+        """Who is on the block RIGHT NOW: nominees + replacements, minus anyone
+        the veto saved. The single fact everyone actually asks for — and the
+        same arithmetic /votes uses, so the two commands agree by construction."""
+        saved = set(state.get("veto_used_on", []))
+        block = (state.get("nominee", []) + state.get("replacement_nominee", []))
+        return [n for n in dict.fromkeys(block) if n not in saved]
+
     @app_commands.command(name="gamestate", description="Show the current week's game state.")
     async def gamestate(self, interaction: discord.Interaction):
         await interaction.response.defer()
@@ -185,13 +194,41 @@ class BBCommands(commands.Cog):
                               color=0xF1C40F, timestamp=discord.utils.utcnow())
         if not state:
             embed.description = "No game-state facts recorded for this week yet."
-        else:
-            labels = {"hoh": "👑 HOH", "nominee": "🪑 Nominees", "veto_winner": "💎 Veto",
-                      "veto_used_on": "🔓 Veto used on", "evicted": "🚪 Evicted",
-                      "replacement_nominee": "🔁 Replacement"}
-            for role, names in state.items():
-                embed.add_field(name=labels.get(role, role.title()),
-                                value=", ".join(names), inline=True)
+            await interaction.followup.send(embed=embed)
+            return
+
+        # The current answer first; the history as a timeline beneath it.
+        lines = []
+        block = self.current_block(state)
+        if block:
+            note = " _(Block Buster decides the final two)_" if len(block) == 3 else ""
+            lines.append(f"**On the block: {', '.join(block)}**{note}\n")
+
+        if state.get("hoh"):
+            lines.append(f"👑 **HOH**  {', '.join(state['hoh'])}")
+        if state.get("have_not"):
+            lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
+        if state.get("nominee"):
+            lines.append(f"🪑 **Nominated**  {', '.join(state['nominee'])}")
+        # Veto: one line telling the whole story instead of two redundant fields.
+        vw = state.get("veto_winner", [])
+        vu = state.get("veto_used_on", [])
+        if vw:
+            w = ", ".join(vw)
+            if vu and set(vu) == set(vw):
+                lines.append(f"💎 **Veto**  {w} won — used on themselves")
+            elif vu:
+                lines.append(f"💎 **Veto**  {w} won — used on {', '.join(vu)}")
+            else:
+                lines.append(f"💎 **Veto**  {w} won — not used (or not decided yet)")
+        elif vu:
+            lines.append(f"💎 **Veto**  used on {', '.join(vu)}")
+        if state.get("replacement_nominee"):
+            lines.append(f"🔁 **Renom**  {', '.join(state['replacement_nominee'])}")
+        if state.get("evicted"):
+            lines.append(f"🚪 **Evicted**  {', '.join(state['evicted'])}")
+
+        embed.description = "\n".join(lines)
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="ask", description="Ask a question about anything that happened on the feeds.")
@@ -228,12 +265,7 @@ class BBCommands(commands.Cog):
         await interaction.response.defer()
         week = self.bot.game_state.current_week()
         state = await self.bot.game_state.current(week)
-        saved_by_veto = set(state.get("veto_used_on", []))
-        noms = [n for n in (state.get("nominee", []) +
-                            state.get("replacement_nominee", []))
-                if n not in saved_by_veto]
-        # de-dup, preserve order
-        noms = list(dict.fromkeys(noms))
+        noms = self.current_block(state)
 
         embed = discord.Embed(title=f"🗳️ Vote Count — Week {week}",
                               color=0xE67E22, timestamp=discord.utils.utcnow())

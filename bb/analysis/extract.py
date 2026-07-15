@@ -96,7 +96,8 @@ _SCHEMA = {
                 "properties": {
                     "role": {"type": "string",
                              "enum": ["hoh", "nominee", "veto_winner",
-                                      "veto_used_on", "evicted", "replacement_nominee"]},
+                                      "veto_used_on", "evicted", "replacement_nominee",
+                                      "have_not"]},
                     "houseguest": {"type": "string"},
                     "confidence": {"type": "number"},
                     "evidence": {"type": "string"},
@@ -178,7 +179,9 @@ class Extractor:
             "veto comp or ceremony has not happened yet, there is no replacement "
             "nominee — omit it entirely.\n"
             "- 'nominee' means someone actually nominated at the nomination "
-            "ceremony, not someone people are discussing nominating.\n"
+            "ceremony, not someone people are discussing nominating.\n"            "- 'have_not' records each houseguest who IS a Have-Not this week "
+            "(slop, cold showers, have-not room) — decided fact, one entry per "
+            "houseguest, not volunteers being discussed.\n"
             "- A vote plan requires the voter stating or clearly implying who they "
             "will vote to evict this week — not who they dislike. Set 'firmness' to "
             "'locked' only for definite statements ('100%', 'for sure'), 'unsure' when "
