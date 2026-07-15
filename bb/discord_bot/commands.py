@@ -281,7 +281,7 @@ class BBCommands(commands.Cog):
             hoh = (state.get("hoh") or [None])[0]
             embed.description = (
                 f"Three on the block: **{', '.join(noms)}**. The Block Buster "
-                "winner escapes and votes — each outcome below."
+                "winner comes off the block and votes — each outcome below."
                 + (f" HOH **{hoh}** votes only to break a tie." if hoh else ""))
             digits = ["1️⃣", "2️⃣", "3️⃣"]   # keycap emoji are multi-codepoint: list, never slice
             for i, saved in enumerate(noms):
@@ -309,7 +309,7 @@ class BBCommands(commands.Cog):
                     name=f"{digits[i]}  {saved} wins Block Buster  →  {pair[0]} vs {pair[1]}",
                     value="\n".join(lines), inline=False)
             embed.set_footer(text="Ranked plans: a voter's fallback counts when their first "
-                                  "choice escapes. HOH votes only on a tie. "
+                                  "choice wins the Block Buster. HOH votes only on a tie. "
                                   "🔒 locked · ? unsure. "
                                   "Houseguests flip — snapshot, not a prediction.")
             await interaction.followup.send(embed=embed)
