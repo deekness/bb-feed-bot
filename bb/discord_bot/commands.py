@@ -307,7 +307,7 @@ class BBCommands(commands.Cog):
             embed.set_footer(text="Ranked plans: a voter's fallback counts when their first "
                                   "choice escapes. HOH votes only on a tie. "
                                   "🔒 locked · ? unsure. "
-                                  "Houseguests flip — snapshot, not a lock.")
+                                  "Houseguests flip — snapshot, not a prediction.")
             await interaction.followup.send(embed=embed)
             return
 
@@ -329,7 +329,7 @@ class BBCommands(commands.Cog):
             if hoh:
                 foot += f"HOH {hoh} votes only to break a tie. "
             embed.set_footer(text=foot + "🔒 locked · ? unsure. "
-                                  "Houseguests flip — snapshot, not a lock.")
+                                  "Houseguests flip — snapshot, not a prediction.")
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="houseguest", description="Everything tracked about one houseguest.")
