@@ -27,15 +27,18 @@ class VoteTracker:
                 await self.db.execute(
                     """
                     INSERT INTO vote_plans (week, voter, target, confidence, evidence,
-                                            firmness, source_hash)
-                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                                            firmness, fallback_target, source_hash)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
                     ON CONFLICT (week, voter) DO UPDATE
                     SET target = EXCLUDED.target, confidence = EXCLUDED.confidence,
                         evidence = EXCLUDED.evidence, firmness = EXCLUDED.firmness,
+                        fallback_target = EXCLUDED.fallback_target,
                         source_hash = EXCLUDED.source_hash, updated_at = now()
                     """,
                     week, p.voter, p.target, p.confidence, p.evidence[:500],
-                    getattr(p, "firmness", "leaning"), getattr(p, "source_hash", ""),
+                    getattr(p, "firmness", "leaning"),
+                    getattr(p, "fallback_target", "") or "",
+                    getattr(p, "source_hash", ""),
                 )
             except Exception as e:
                 log.error("vote ingest failed: %s", e)
@@ -54,7 +57,7 @@ class VoteTracker:
             "SELECT max(set_at) FROM game_state WHERE role = 'evicted'")
         rows = await self.db.fetch(
             """
-            SELECT DISTINCT ON (voter) voter, target, firmness
+            SELECT DISTINCT ON (voter) voter, target, firmness, fallback_target
             FROM vote_plans
             WHERE week BETWEEN $1 AND $2
               AND ($3::timestamptz IS NULL OR updated_at > $3)
@@ -70,6 +73,71 @@ class VoteTracker:
                 continue
             counts.setdefault(r["target"], []).append((r["voter"], r["firmness"]))
         return counts
+
+    async def plans(self, week: int) -> list[dict]:
+        """Latest ranked plan per voter (same filters as current())."""
+        last_evict = await self.db.fetchval(
+            "SELECT max(set_at) FROM game_state WHERE role = 'evicted'")
+        rows = await self.db.fetch(
+            """
+            SELECT DISTINCT ON (voter) voter, target, firmness, fallback_target
+            FROM vote_plans
+            WHERE week BETWEEN $1 AND $2
+              AND ($3::timestamptz IS NULL OR updated_at > $3)
+            ORDER BY voter, updated_at DESC
+            """,
+            max(1, week - 1), week, last_evict,
+        )
+        evicted = {r["houseguest"] for r in await self.db.fetch(
+            "SELECT houseguest FROM game_state WHERE role = 'evicted'")}
+        return [dict(r) for r in rows if r["voter"] not in evicted]
+
+    @staticmethod
+    def scenario_board(plans: list[dict], pair: tuple[str, str], saved: str,
+                       hoh: str | None = None) -> dict[str, list[tuple[str, str]]]:
+        """One Block Buster outcome: `saved` escaped, `pair` face the vote.
+
+        Each voter's vote is their highest-ranked preference that is actually on
+        the block — target first, else fallback. The saved houseguest becomes a
+        VOTER (that's the twist), with their own stated preference applied. A
+        voter with no ranked preference in the pair is listed under '?'.
+
+        The HOH does NOT cast a regular vote — they only break a tie — so they
+        are excluded here; use hoh_pick() to see how they'd break one.
+        """
+        a, b = pair
+        board: dict[str, list[tuple[str, str]]] = {a: [], b: [], "?": []}
+        for p in plans:
+            voter = p["voter"]
+            if voter in pair or (hoh and voter == hoh):
+                continue                    # on the block / HOH: doesn't vote
+            first, second = p["target"], p.get("fallback_target") or ""
+            if first in pair:
+                board[first].append((voter, p["firmness"]))
+            elif second in pair:
+                # second choice inferred -> never firmer than 'leaning'
+                f = "unsure" if p["firmness"] == "unsure" else "leaning"
+                board[second].append((voter, f))
+            else:
+                board["?"].append((voter, p["firmness"]))
+        return board
+
+    @staticmethod
+    def hoh_pick(plans: list[dict], pair: tuple[str, str],
+                 hoh: str | None) -> str | None:
+        """Who the HOH would evict between `pair` if forced to break a tie,
+        from their own stated ranked plan. None if they haven't said."""
+        if not hoh:
+            return None
+        for p in plans:
+            if p["voter"] != hoh:
+                continue
+            if p["target"] in pair:
+                return p["target"]
+            fb = p.get("fallback_target") or ""
+            if fb in pair:
+                return fb
+        return None
 
     async def remove(self, voter: str, week: int) -> bool:
         result = await self.db.execute(

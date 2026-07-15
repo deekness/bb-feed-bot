@@ -183,6 +183,11 @@ class Extractor:
             "will vote to evict this week — not who they dislike. Set 'firmness' to "
             "'locked' only for definite statements ('100%', 'for sure'), 'unsure' when "
             "they are wavering, else 'leaning'.\n"
+            "- RANKED VOTES: this season three houseguests are nominated and one "
+            "escapes eviction night via the Block Buster comp, so voters often rank: "
+            "'I want Taylor out, but if she saves herself I vote Ashley'. Put the "
+            "first choice in 'target' and the conditional second in 'fallback_target'. "
+            "A plain 'voting X' statement is target only, no fallback.\n"
             "- Mark an alliance 'one_sided' ONLY when the text clearly shows the deal "
             "isn't mutual (one side trusts it while another schemes against them). When "
             "in doubt, leave it false. When you do mark it, ALWAYS fill 'one_sided_by' "
@@ -328,8 +333,12 @@ class Extractor:
             firmness = str(v.get("firmness", "leaning")).lower()
             if firmness not in ("locked", "leaning", "unsure"):
                 firmness = "leaning"
+            fb = self.roster.resolve(str(v.get("fallback_target") or "")) or ""
+            if fb in (voter, target):
+                fb = ""          # a fallback must be a distinct third person
             result.vote_plans.append(VotePlan(
                 voter=voter, target=target,
+                fallback_target=fb,
                 confidence=_clamp(v.get("confidence", 0.5)),
                 evidence=str(v.get("evidence", ""))[:500],
                 firmness=firmness,

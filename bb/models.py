@@ -62,10 +62,14 @@ class GameEvent:
 @dataclass(slots=True)
 class VotePlan:
     voter: str              # canonical roster name
-    target: str             # who they plan to vote to EVICT
+    target: str             # who they plan to vote to EVICT (first choice)
     confidence: float
     evidence: str
     firmness: str = "leaning"  # locked | leaning | unsure
+    # BB28's Block Buster means the final block pair is unknown until eviction
+    # night, so voters state RANKED preferences: "Taylor, but Ashley if Taylor
+    # wins the Block Buster". The second choice lives here.
+    fallback_target: str = ""
     source_hash: str = ""
 
 
