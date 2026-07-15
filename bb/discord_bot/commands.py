@@ -211,12 +211,15 @@ class BBCommands(commands.Cog):
 
     _FIRM_MARK = {"locked": "🔒", "unsure": "?", "leaning": ""}
 
-    def _voters_line(self, voters: list[tuple[str, str]]) -> str:
+    def _voters_line(self, voters: list[tuple[str, str]],
+                     marks: bool = True) -> str:
         # 'unsure' renders as a plain trailing '?' (Melody?) — the emoji ❔ is
         # full-width and visually shouted over the actual vote counts.
+        # marks=False for the 'unclear' bucket: that bucket already means "vote
+        # unknown for this pair", so a firmness '?' there is a double label.
         out = []
         for v, f in sorted(voters):
-            mark = self._FIRM_MARK.get(f, "")
+            mark = self._FIRM_MARK.get(f, "") if marks else ""
             out.append(f"{v} {mark}" if mark == "🔒" else f"{v}{mark}")
         return ", ".join(out) or "—"
 
@@ -258,7 +261,8 @@ class BBCommands(commands.Cog):
                     lines.append(f"**Evict {tgt} — {len(voters)}**  "
                                  f"{self._voters_line(voters)}")
                 if board["?"]:
-                    lines.append(f"_unclear: {self._voters_line(board['?'])}_")
+                    lines.append("_unclear: "
+                                 f"{self._voters_line(board['?'], marks=False)}_")
                 # a tie is where the HOH suddenly matters — surface their pick
                 if hoh and len(board[pair[0]]) == len(board[pair[1]]):
                     pick = self.bot.votes.hoh_pick(plans, pair, hoh)
