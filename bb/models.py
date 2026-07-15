@@ -70,6 +70,10 @@ class VotePlan:
     # night, so voters state RANKED preferences: "Taylor, but Ashley if Taylor
     # wins the Block Buster". The second choice lives here.
     fallback_target: str = ""
+    # Who the statement was made TO — the axis deception lives on. A vote
+    # stated inside the voter's own alliance is credible; the same words said
+    # to the target's closest ally are theatre.
+    said_to: list[str] = field(default_factory=list)
     source_hash: str = ""
 
 
