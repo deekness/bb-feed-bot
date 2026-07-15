@@ -283,26 +283,30 @@ class BBCommands(commands.Cog):
                 f"Three on the block: **{', '.join(noms)}**. The Block Buster "
                 "winner escapes and votes — each outcome below."
                 + (f" HOH **{hoh}** votes only to break a tie." if hoh else ""))
-            for saved in noms:
+            digits = ["1️⃣", "2️⃣", "3️⃣"]   # keycap emoji are multi-codepoint: list, never slice
+            for i, saved in enumerate(noms):
                 pair = tuple(n for n in noms if n != saved)
                 board = self.bot.votes.scenario_board(plans, pair, saved, hoh=hoh)
+                # Names go on their own indented line under each count — the
+                # count row scans as a scoreboard instead of melting into the
+                # voter list, and scenarios read as separate cards.
                 lines = []
                 for tgt in pair:
                     voters = board[tgt]
-                    lines.append(f"**Evict {tgt} — {len(voters)}**  "
-                                 f"{self._voters_line(voters)}")
+                    lines.append(f"**Evict {tgt} — {len(voters)}**")
+                    lines.append(f"-# {self._voters_line(voters)}")
                 if board["?"]:
-                    lines.append("_unclear: "
+                    lines.append(f"-# _unclear: "
                                  f"{self._voters_line(board['?'], marks=False)}_")
-                # a tie is where the HOH suddenly matters — surface their pick
                 if hoh and len(board[pair[0]]) == len(board[pair[1]]):
                     pick = self.bot.votes.hoh_pick(plans, pair, hoh)
                     lines.append(
                         f"⚖️ **Tied {len(board[pair[0]])}–{len(board[pair[1]])}** — "
                         + (f"HOH {hoh} breaks it: evict **{pick}**" if pick
                            else f"HOH {hoh} breaks it (no stated lean)"))
+                lines.append("\u200b")   # breathing room between scenario cards
                 embed.add_field(
-                    name=f"If {saved} wins the Block Buster → {pair[0]} vs {pair[1]}",
+                    name=f"{digits[i]}  {saved} escapes  →  {pair[0]} vs {pair[1]}",
                     value="\n".join(lines), inline=False)
             embed.set_footer(text="Ranked plans: a voter's fallback counts when their first "
                                   "choice escapes. HOH votes only on a tie. "
