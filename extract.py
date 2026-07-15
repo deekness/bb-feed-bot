@@ -240,12 +240,14 @@ class BBCommands(commands.Cog):
                 embed.description = "No evidenced vote plans tracked yet this week."
                 await interaction.followup.send(embed=embed)
                 return
+            hoh = (state.get("hoh") or [None])[0]
             embed.description = (
                 f"Three on the block: **{', '.join(noms)}**. The Block Buster "
-                "winner escapes and votes — each outcome below.")
+                "winner escapes and votes — each outcome below."
+                + (f" HOH **{hoh}** votes only to break a tie." if hoh else ""))
             for saved in noms:
                 pair = tuple(n for n in noms if n != saved)
-                board = self.bot.votes.scenario_board(plans, pair, saved)
+                board = self.bot.votes.scenario_board(plans, pair, saved, hoh=hoh)
                 lines = []
                 for tgt in pair:
                     voters = board[tgt]
@@ -253,16 +255,30 @@ class BBCommands(commands.Cog):
                                  f"{self._voters_line(voters)}")
                 if board["?"]:
                     lines.append(f"❔ unclear: {self._voters_line(board['?'])}")
+                # a tie is where the HOH suddenly matters — surface their pick
+                if hoh and len(board[pair[0]]) == len(board[pair[1]]):
+                    pick = self.bot.votes.hoh_pick(plans, pair, hoh)
+                    lines.append(
+                        f"⚖️ **Tied {len(board[pair[0]])}–{len(board[pair[1]])}** — "
+                        + (f"HOH {hoh} breaks it: evict **{pick}**" if pick
+                           else f"HOH {hoh} breaks it (no stated lean)"))
                 embed.add_field(
                     name=f"If {saved} wins the Block Buster → {pair[0]} vs {pair[1]}",
                     value="\n".join(lines), inline=False)
             embed.set_footer(text="Ranked plans: a voter's fallback counts when their first "
-                                  "choice escapes. 🔒 locked · ❔ unsure/unclear. "
+                                  "choice escapes. HOH votes only on a tie. "
+                                  "🔒 locked · ❔ unsure/unclear. "
                                   "Houseguests flip — snapshot, not a lock.")
             await interaction.followup.send(embed=embed)
             return
 
+        hoh = (state.get("hoh") or [None])[0]
         counts = await self.bot.votes.current(week)
+        if hoh:
+            # The HOH doesn't cast a regular vote — only breaks ties.
+            counts = {t: [(v, f) for v, f in vs if v != hoh]
+                      for t, vs in counts.items()}
+            counts = {t: vs for t, vs in counts.items() if vs}
         if not counts:
             embed.description = "No evidenced vote plans tracked yet this week."
         else:
@@ -270,8 +286,11 @@ class BBCommands(commands.Cog):
             for target, voters in ranked:
                 embed.add_field(name=f"To evict {target} — {len(voters)}",
                                 value=self._voters_line(voters), inline=False)
-            embed.set_footer(text="Latest stated plan per voter since the last eviction. "
-                                  "🔒 locked · ❔ unsure. Houseguests flip — snapshot, not a lock.")
+            foot = "Latest stated plan per voter since the last eviction. "
+            if hoh:
+                foot += f"HOH {hoh} votes only to break a tie. "
+            embed.set_footer(text=foot + "🔒 locked · ❔ unsure. "
+                                  "Houseguests flip — snapshot, not a lock.")
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="houseguest", description="Everything tracked about one houseguest.")
