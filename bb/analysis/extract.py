@@ -188,6 +188,10 @@ class Extractor:
             "'I want Taylor out, but if she saves herself I vote Ashley'. Put the "
             "first choice in 'target' and the conditional second in 'fallback_target'. "
             "A plain 'voting X' statement is target only, no fallback.\n"
+            "- AUDIENCE: when the update names who the voter was talking to, fill "
+            "'said_to' with those houseguests. Houseguests bluff — a vote stated to "
+            "the target or the target's allies is often theatre, so the audience is "
+            "real signal. Never infer listeners who aren't named.\n"
             "- Mark an alliance 'one_sided' ONLY when the text clearly shows the deal "
             "isn't mutual (one side trusts it while another schemes against them). When "
             "in doubt, leave it false. When you do mark it, ALWAYS fill 'one_sided_by' "
@@ -336,9 +340,12 @@ class Extractor:
             fb = self.roster.resolve(str(v.get("fallback_target") or "")) or ""
             if fb in (voter, target):
                 fb = ""          # a fallback must be a distinct third person
+            aud = [m for m in self.roster.resolve_all(list(v.get("said_to") or []))
+                   if m != voter]
             result.vote_plans.append(VotePlan(
                 voter=voter, target=target,
                 fallback_target=fb,
+                said_to=aud,
                 confidence=_clamp(v.get("confidence", 0.5)),
                 evidence=str(v.get("evidence", ""))[:500],
                 firmness=firmness,
