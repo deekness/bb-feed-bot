@@ -197,13 +197,7 @@ class BBCommands(commands.Cog):
             await interaction.followup.send(embed=embed)
             return
 
-        # The current answer first; the history as a timeline beneath it.
         lines = []
-        block = self.current_block(state)
-        if block:
-            note = " _(Block Buster decides the final two)_" if len(block) == 3 else ""
-            lines.append(f"**On the block: {', '.join(block)}**{note}\n")
-
         if state.get("hoh"):
             lines.append(f"👑 **HOH**  {', '.join(state['hoh'])}")
         if state.get("nominee"):
