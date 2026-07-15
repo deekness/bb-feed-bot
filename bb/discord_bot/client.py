@@ -786,6 +786,12 @@ class BBBot(commands.Bot):
                 # are not written. Alliances/relationships still track.
                 if await self._feeds_are_live():
                     await self.game_state.ingest(extraction.game_events)
+                    # An eviction is ground truth for the alliance map too:
+                    # the houseguest leaves every alliance, and any group left
+                    # below two live members (an orphaned F2) dissolves.
+                    for ev in extraction.game_events:
+                        if ev.role == "evicted":
+                            await self.alliances.handle_eviction(ev.houseguest)
                     await self.votes.ingest(extraction.vote_plans,
                                             self.game_state.current_week())
                 elif extraction.game_events or extraction.vote_plans:
