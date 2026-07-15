@@ -209,12 +209,16 @@ class BBCommands(commands.Cog):
         embed = await self.bot.summarizer.ask(question, matches, dailies, context)
         await interaction.followup.send(embed=embed)
 
-    _FIRM_MARK = {"locked": "🔒", "unsure": "❔", "leaning": ""}
+    _FIRM_MARK = {"locked": "🔒", "unsure": "?", "leaning": ""}
 
     def _voters_line(self, voters: list[tuple[str, str]]) -> str:
-        m = self._FIRM_MARK
-        return ", ".join(f"{v}{(' ' + m[f]) if m.get(f) else ''}"
-                         for v, f in sorted(voters)) or "—"
+        # 'unsure' renders as a plain trailing '?' (Melody?) — the emoji ❔ is
+        # full-width and visually shouted over the actual vote counts.
+        out = []
+        for v, f in sorted(voters):
+            mark = self._FIRM_MARK.get(f, "")
+            out.append(f"{v} {mark}" if mark == "🔒" else f"{v}{mark}")
+        return ", ".join(out) or "—"
 
     @app_commands.command(name="votes", description="Where the eviction votes stand this week.")
     async def votes(self, interaction: discord.Interaction):
@@ -254,7 +258,7 @@ class BBCommands(commands.Cog):
                     lines.append(f"**Evict {tgt} — {len(voters)}**  "
                                  f"{self._voters_line(voters)}")
                 if board["?"]:
-                    lines.append(f"❔ unclear: {self._voters_line(board['?'])}")
+                    lines.append(f"_unclear: {self._voters_line(board['?'])}_")
                 # a tie is where the HOH suddenly matters — surface their pick
                 if hoh and len(board[pair[0]]) == len(board[pair[1]]):
                     pick = self.bot.votes.hoh_pick(plans, pair, hoh)
@@ -267,7 +271,7 @@ class BBCommands(commands.Cog):
                     value="\n".join(lines), inline=False)
             embed.set_footer(text="Ranked plans: a voter's fallback counts when their first "
                                   "choice escapes. HOH votes only on a tie. "
-                                  "🔒 locked · ❔ unsure/unclear. "
+                                  "🔒 locked · ? unsure. "
                                   "Houseguests flip — snapshot, not a lock.")
             await interaction.followup.send(embed=embed)
             return
@@ -289,7 +293,7 @@ class BBCommands(commands.Cog):
             foot = "Latest stated plan per voter since the last eviction. "
             if hoh:
                 foot += f"HOH {hoh} votes only to break a tie. "
-            embed.set_footer(text=foot + "🔒 locked · ❔ unsure. "
+            embed.set_footer(text=foot + "🔒 locked · ? unsure. "
                                   "Houseguests flip — snapshot, not a lock.")
         await interaction.followup.send(embed=embed)
 
