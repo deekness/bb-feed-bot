@@ -206,8 +206,6 @@ class BBCommands(commands.Cog):
 
         if state.get("hoh"):
             lines.append(f"👑 **HOH**  {', '.join(state['hoh'])}")
-        if state.get("have_not"):
-            lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
         if state.get("nominee"):
             saved = set(state.get("veto_used_on", []))
             # Saved noms go to the END, struck through — at a glance the line
@@ -230,6 +228,8 @@ class BBCommands(commands.Cog):
             lines.append(f"💎 **Veto**  used on {', '.join(vu)}")
         if state.get("replacement_nominee"):
             lines.append(f"🔁 **Renom**  {', '.join(state['replacement_nominee'])}")
+        if state.get("have_not"):
+            lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
         if state.get("evicted"):
             lines.append(f"🚪 **Evicted**  {', '.join(state['evicted'])}")
 
