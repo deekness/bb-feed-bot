@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /namealliance, /setmembers, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
+        /rejectalliance, /namealliance, /setmembers, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -534,6 +534,33 @@ class BBCommands(commands.Cog):
         ok = await self.bot.alliances.confirm(alliance_id)
         await interaction.response.send_message(
             f"{'✅ Confirmed' if ok else '❌ Not found'}: alliance #{alliance_id}", ephemeral=True)
+
+    @app_commands.command(
+        name="resetrelationships",
+        description="(Admin) Wipe relationship data — one pair, one houseguest, or all.")
+    @app_commands.describe(houseguest_a="First houseguest (omit both to wipe ALL)",
+                           houseguest_b="Second houseguest (omit to wipe all of A's rows)")
+    async def resetrelationships(self, interaction: discord.Interaction,
+                                 houseguest_a: str | None = None,
+                                 houseguest_b: str | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        a = self.bot.roster.resolve(houseguest_a) if houseguest_a else None
+        b = self.bot.roster.resolve(houseguest_b) if houseguest_b else None
+        if houseguest_a and not a:
+            await interaction.response.send_message(
+                f"'{houseguest_a}' isn't on the roster.", ephemeral=True)
+            return
+        if houseguest_b and not b:
+            await interaction.response.send_message(
+                f"'{houseguest_b}' isn't on the roster.", ephemeral=True)
+            return
+        n = await self.bot.relationships.reset(a, b)
+        scope = f"{a} & {b}" if a and b else (f"all of {a}'s pairs" if a else "ALL pairs")
+        await interaction.response.send_message(
+            f"🧹 Cleared {n} relationship row(s) ({scope}). They'll rebuild from "
+            "fresh feed evidence under the new extraction rules.", ephemeral=True)
 
     @app_commands.command(name="setmembers",
                           description="(Admin) Set an alliance's exact member list.")
