@@ -110,6 +110,23 @@ class RelationshipTracker:
             "WHERE label IN ('allies', 'rivals', 'betrayed') AND abs(affinity) < 0.4"
         )
 
+    async def reset(self, a: str | None = None, b: str | None = None) -> int:
+        """Wipe relationship rows: one pair, one houseguest's rows, or ALL.
+        The repair tool for when accumulated data measured the wrong thing."""
+        if a and b:
+            hg_a, hg_b = sorted([a, b])
+            r = await self.db.execute(
+                "DELETE FROM relationships WHERE hg_a = $1 AND hg_b = $2", hg_a, hg_b)
+        elif a:
+            r = await self.db.execute(
+                "DELETE FROM relationships WHERE hg_a = $1 OR hg_b = $1", a)
+        else:
+            r = await self.db.execute("DELETE FROM relationships")
+        try:
+            return int(r.split()[-1])
+        except (ValueError, IndexError, AttributeError):
+            return 0
+
     async def notable(self, limit: int = 12) -> list[dict]:
         """Labeled pairs (allies / rivals / betrayed / showmance), strongest
         first — the relationship state a recap should weave in."""
