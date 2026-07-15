@@ -130,13 +130,26 @@ class AllianceTracker:
             "one_sided = $4, one_sided_by = $5 WHERE id = $6",
             new_conf, status, name, one_sided, by, alliance_id,
         )
-        # Merge any new members in.
-        for hg in proposal.members:
-            await self.db.execute(
-                "INSERT INTO alliance_members (alliance_id, houseguest) VALUES ($1, $2) "
-                "ON CONFLICT (alliance_id, houseguest) DO UPDATE SET active = TRUE",
-                alliance_id, hg,
-            )
+        # Merge new members in — but NOT into a named alliance from unnamed
+        # chatter. Named groups have canonical rosters; when two alliances'
+        # members start scheming together (Red Corner + Crossovers forming a
+        # majority), the cross-talk Jaccard-matches both and each silently
+        # absorbs the other's people. An unnamed proposal may corroborate a
+        # named alliance's confidence, but only a proposal carrying the SAME
+        # name ("X joined the Red Corner") can change its membership.
+        may_add = (not name) or (
+            proposal.name and str(proposal.name).strip().lower()
+            == str(name).strip().lower())
+        if may_add:
+            for hg in proposal.members:
+                await self.db.execute(
+                    "INSERT INTO alliance_members (alliance_id, houseguest) VALUES ($1, $2) "
+                    "ON CONFLICT (alliance_id, houseguest) DO UPDATE SET active = TRUE",
+                    alliance_id, hg,
+                )
+        elif set(proposal.members) - set(match["members"]):
+            log.info("not adding %s to named alliance #%s from unnamed evidence",
+                     sorted(set(proposal.members) - set(match["members"])), alliance_id)
 
     async def _best_match(self, members: list[str], name: str | None = None):
         rows = await self.db.fetch(
@@ -327,6 +340,25 @@ class AllianceTracker:
             alliance_id,
         )
         return _rowcount(result) > 0
+
+    async def set_members(self, alliance_id: int, members: list[str]) -> bool:
+        """Replace an alliance's roster by hand — the repair tool for accreted
+        membership. Existing members not in the list go inactive."""
+        if len(members) < 2:
+            return False
+        exists = await self.db.fetchval(
+            "SELECT 1 FROM alliances WHERE id = $1", alliance_id)
+        if not exists:
+            return False
+        await self.db.execute(
+            "UPDATE alliance_members SET active = FALSE WHERE alliance_id = $1",
+            alliance_id)
+        for hg in members:
+            await self.db.execute(
+                "INSERT INTO alliance_members (alliance_id, houseguest) VALUES ($1, $2) "
+                "ON CONFLICT (alliance_id, houseguest) DO UPDATE SET active = TRUE",
+                alliance_id, hg)
+        return True
 
     async def rename(self, alliance_id: int, name: str | None) -> bool:
         """Set or clear an alliance's name by hand (fixes a misattributed one)."""
