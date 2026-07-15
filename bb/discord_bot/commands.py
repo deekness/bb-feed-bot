@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /namealliance, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
+        /rejectalliance, /namealliance, /setmembers, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -534,6 +534,34 @@ class BBCommands(commands.Cog):
         ok = await self.bot.alliances.confirm(alliance_id)
         await interaction.response.send_message(
             f"{'✅ Confirmed' if ok else '❌ Not found'}: alliance #{alliance_id}", ephemeral=True)
+
+    @app_commands.command(name="setmembers",
+                          description="(Admin) Set an alliance's exact member list.")
+    @app_commands.describe(alliance_id="The #id shown in /alliances",
+                           members="Space- or comma-separated houseguest names")
+    async def setmembers(self, interaction: discord.Interaction,
+                         alliance_id: int, members: str):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        raw = [w for w in members.replace(",", " ").split() if w]
+        resolved, unknown = [], []
+        for w in raw:
+            hg = self.bot.roster.resolve(w)
+            (resolved if hg else unknown).append(hg or w)
+        resolved = list(dict.fromkeys(resolved))
+        if unknown:
+            await interaction.response.send_message(
+                f"Not on the roster: {', '.join(unknown)}", ephemeral=True)
+            return
+        if len(resolved) < 2:
+            await interaction.response.send_message(
+                "An alliance needs at least 2 members.", ephemeral=True)
+            return
+        ok = await self.bot.alliances.set_members(alliance_id, resolved)
+        await interaction.response.send_message(
+            (f"👥 Alliance #{alliance_id} roster set to: {', '.join(resolved)}."
+             if ok else f"No alliance #{alliance_id}."), ephemeral=True)
 
     @app_commands.command(name="namealliance",
                           description="(Admin) Set or clear an alliance's name.")
