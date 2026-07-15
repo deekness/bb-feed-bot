@@ -210,13 +210,23 @@ class AllianceTracker:
                  proposal.name or "/".join(proposal.members), status)
 
     async def decay(self) -> int:
-        """Lower confidence for stale (non-locked) alliances; dissolve the weakest."""
+        """Lower confidence for stale (non-locked) alliances; dissolve the weakest.
+
+        Decays only the time elapsed since the LAST decay run (or the last
+        sighting, whichever is newer). The old version subtracted
+        rate x (now - last_seen) on EVERY run without recording that it had
+        decayed — so a daily run re-subtracted the alliance's entire age each
+        day, compounding quadratically and dissolving quiet-but-real alliances
+        several times faster than the configured rate."""
         await self.db.execute(
             """
             UPDATE alliances
             SET confidence = GREATEST(0, confidence -
-                ($1 * EXTRACT(EPOCH FROM (now() - last_seen)) / 86400.0))
+                ($1 * EXTRACT(EPOCH FROM (now() - GREATEST(last_seen, decayed_at)))
+                     / 86400.0)),
+                decayed_at = now()
             WHERE NOT locked AND status <> 'dissolved'
+              AND GREATEST(last_seen, decayed_at) < now()
             """,
             self.DECAY_PER_DAY,
         )
@@ -284,6 +294,32 @@ class AllianceTracker:
             alliance_id, limit,
         )
         return [dict(r) for r in rows]
+
+    async def handle_eviction(self, houseguest: str) -> None:
+        """An eviction is ground truth: the houseguest leaves every alliance.
+
+        Their membership goes inactive everywhere (so displays, briefings and
+        the vote-credibility trust math stop counting a ghost), and any
+        alliance left with fewer than two live members — an F2 whose partner
+        walked out the door — is dissolved. This applies even to locked
+        alliances: a human /confirm can't keep someone in the house.
+        """
+        await self.db.execute(
+            "UPDATE alliance_members SET active = FALSE WHERE houseguest = $1",
+            houseguest)
+        result = await self.db.execute(
+            """
+            UPDATE alliances SET status = 'dissolved'
+            WHERE status <> 'dissolved' AND id IN (
+                SELECT a.id FROM alliances a
+                LEFT JOIN alliance_members m
+                       ON m.alliance_id = a.id AND m.active
+                GROUP BY a.id
+                HAVING count(m.houseguest) < 2)
+            """)
+        n = _rowcount(result)
+        log.info("eviction of %s: removed from alliances; %d dissolved (below 2 members)",
+                 houseguest, n)
 
     async def confirm(self, alliance_id: int) -> bool:
         result = await self.db.execute(
