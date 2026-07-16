@@ -122,7 +122,8 @@ class BBBot(commands.Bot):
         self.alliances = AllianceTracker(self.db)
         self.relationships = RelationshipTracker(self.db)
         self.game_state = GameStateTracker(self.db, season.start_date,
-                                             season.house_day_one)
+                                             season.house_day_one,
+                                             house_tz=self.house_tz)
         self.votes = VoteTracker(self.db)
 
         self._recent_for_context: list = []  # last few processed updates
@@ -146,6 +147,18 @@ class BBBot(commands.Bot):
         if self.roster.is_empty:
             log.warning("Roster is EMPTY — fill in season.yaml. Extraction stays "
                         "disabled until the roster is populated.")
+        # Purge game-state rows written into future weeks. Tonight's episode
+        # chatter landed in "week 2" while the UTC clock bug was live; any row
+        # beyond the current house week is garbage by definition.
+        wk = self.game_state.current_week()
+        res = await self.db.execute("DELETE FROM game_state WHERE week > $1", wk)
+        try:
+            purged = int(res.split()[-1])
+        except (ValueError, IndexError, AttributeError):
+            purged = 0
+        if purged:
+            log.warning("purged %d game-state rows from future weeks (UTC clock bug)", purged)
+
         self.ingest_loop.start()
         self.hourly_loop.start()
         self.daily_loop.start()
