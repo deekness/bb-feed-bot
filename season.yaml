@@ -14,6 +14,14 @@ season_start_date: "2026-07-09"
 # saying "Day 5" while the bot said "Day 3". Weeks still run from the premiere.
 house_day_one: "2026-07-07"
 
+# CBS episode schedule (Eastern). Usual: Sun 8pm, Wed 8pm (90m), LIVE Thu 8pm (1h).
+# Weeks flip at Thursday 19:30 HOUSE time (US/Pacific) — after the live eviction.
+# Exceptions: Sun Aug 23 8pm (2h) · Thu Aug 27 8pm (90m) · Thu Sep 10 8pm (2h) ·
+# Wed Sep 16 8pm (2h) · Finale ~Thu Oct 1 (TBA).
+# BB Unlocked: Fri Jul 24 8p · Fri Aug 7 8p · Sun Aug 23 9p · Fri Sep 4 8p · Fri Sep 18 9p.
+# Usual feeds blocks (Pacific): Mon ~noon veto meeting · Thu afternoon run-thru +
+# 5pm live show · Fri late-afternoon noms · Sat morning veto draw + afternoon comp.
+
 # Live-feed updates RSS feed (Jokers Updates).
 rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 
