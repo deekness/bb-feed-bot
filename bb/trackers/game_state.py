@@ -7,7 +7,7 @@ from the season start date.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime
+from datetime import date, datetime, time, timedelta
 
 from ..db import Database
 
@@ -46,9 +46,26 @@ class GameStateTracker:
             return datetime.now(self.house_tz).date()
         return date.today()
 
-    def current_week(self, today: date | None = None) -> int:
-        today = today or self._today()
-        return max(1, ((today - self.season_start).days // 7) + 1)
+    # A BB week ends when the Thursday live eviction ends, not at midnight.
+    # Shows start 5 PM Pacific; normal = 1h (ends 6:00), known exceptions run
+    # 90m (Aug 27 -> 6:30) or 2h (Sep 10 -> 7:00). 7:30 PM PT clears them all.
+    WEEK_FLIP = time(19, 30)
+
+    def current_week(self, when: date | datetime | None = None) -> int:
+        """Week number, flipping at Thursday 7:30 PM house time — i.e. after
+        the live eviction — rather than at midnight. A bare date is treated as
+        noon house time (mid-day, safely inside whichever week owns the date)."""
+        if when is None:
+            now = datetime.now(self.house_tz) if self.house_tz else datetime.now()
+        elif isinstance(when, datetime):
+            now = when if when.tzinfo or not self.house_tz else when.replace(tzinfo=self.house_tz)
+            if self.house_tz:
+                now = now.astimezone(self.house_tz)
+        else:  # a bare date
+            now = datetime.combine(when, time(12, 0), tzinfo=self.house_tz)
+        anchor = datetime.combine(self.season_start, self.WEEK_FLIP,
+                                  tzinfo=self.house_tz)
+        return max(1, (now - anchor) // timedelta(days=7) + 1)
 
     def current_day(self, today: date | None = None) -> int:
         """The house day as the FEEDS count it. Big Brother's Day 1 is move-in
