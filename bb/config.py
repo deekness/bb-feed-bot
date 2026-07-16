@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 
 import yaml
@@ -39,6 +39,11 @@ def _parse_episodes(raw: list) -> list[dict]:
     return out
 
 
+def _parse_hm(t: str):
+    h, m = str(t).split(":")
+    return int(h), int(m)
+
+
 @dataclass(frozen=True)
 class Season:
     number: int
@@ -55,10 +60,36 @@ class Season:
     extra_rss_feeds: list = field(default_factory=list)
     episode_recap_enabled: bool = False   # auto-post after each episode
     rss_poll_interval_s: int = 600        # Jokers cadence (Bluesky stays 2min)
+    episode_air_windows: dict = field(default_factory=dict)
     feeds_back_min_minutes: int = 20      # suppress 'feeds are back' below this
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
+
+    def in_episode_window(self, when) -> bool:
+        """Is `when` (tz-aware datetime, any zone) inside an episode airing —
+        including the tail while updaters finish recapping the broadcast?"""
+        from zoneinfo import ZoneInfo
+        cfg = self.episode_air_windows or {}
+        if not cfg:
+            return False
+        house = when.astimezone(ZoneInfo("US/Pacific"))
+        tail = timedelta(minutes=int(cfg.get("tail_minutes", 45)))
+        d = house.date()
+        windows = []
+        for ex in cfg.get("exceptions") or []:
+            if str(ex.get("date")) == d.isoformat():
+                windows.append((ex["start"], int(ex["minutes"])))
+        if not windows:   # exceptions REPLACE the usual slot for that date
+            for w in cfg.get("weekly") or []:
+                if int(w.get("weekday", -1)) == house.weekday():
+                    windows.append((w["start"], int(w["minutes"])))
+        for start, minutes in windows:
+            h, m = _parse_hm(start)
+            begin = house.replace(hour=h, minute=m, second=0, microsecond=0)
+            if begin <= house <= begin + timedelta(minutes=minutes) + tail:
+                return True
+        return False
 
     @classmethod
     def load(cls, path: str | Path) -> "Season":
@@ -81,6 +112,7 @@ class Season:
             extra_rss_feeds=list(data.get("extra_rss_feeds") or []),
             episode_recap_enabled=bool(data.get("episode_recap_enabled", False)),
             rss_poll_interval_s=int(data.get("rss_poll_interval_s", 600)),
+            episode_air_windows=dict(data.get("episode_air_windows") or {}),
             feeds_back_min_minutes=int(data.get("feeds_back_min_minutes", 20)),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
