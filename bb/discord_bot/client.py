@@ -643,6 +643,18 @@ class BBBot(commands.Bot):
         the bot ingests in the background but posts nothing to the channel."""
         return dt.datetime.now(self.tz).date() >= self.season.start_date
 
+    # breaking category -> the game_state role that proves it already happened
+    _BREAKING_ROLE = {"hoh_win": "hoh", "veto_win": "veto_winner",
+                      "veto_ceremony": "veto_used_on",
+                      "nominations": "nominee", "eviction": "evicted"}
+
+    async def _breaking_is_stale(self, category: str) -> bool:
+        role = self._BREAKING_ROLE.get(category)
+        if not role:
+            return False          # blowups/twists have no game-state record
+        state = await self.game_state.current(self.game_state.current_week())
+        return bool(state.get(role))
+
     async def house_context(self) -> str:
         """Short current-state block injected into extraction and summary
         prompts: week, game state, active alliances. Empty pre-roster."""
@@ -741,9 +753,18 @@ class BBBot(commands.Bot):
                     # reported as "wins the veto" / "won POV" / "won the Power of
                     # Veto", which used to be three different keys and therefore
                     # three separate alerts.
-                    key = f"{event_category(kw)}|{','.join(names)}"
+                    category = event_category(kw)
+                    key = f"{category}|{','.join(names)}"
                     now_mono = time.monotonic()
                     if now_mono - self._breaking_last.get(key, float("-inf")) < self.BREAKING_COOLDOWN_S:
+                        continue
+                    # Stage 2.5: an event whose outcome is ALREADY in tracked
+                    # game state isn't breaking. Feeds broke it days ago; the
+                    # cooldown has long expired by the time the EPISODE airs and
+                    # every updater re-narrates it ("Mallory won the veto!") —
+                    # old news to a room of live-feeders. DB-backed, so it
+                    # survives restarts, and a new week resets it naturally.
+                    if await self._breaking_is_stale(category):
                         continue
                     # Stage 3 (LLM): the real gate. Returns None for discussion,
                     # planning, jokes and speculation — and now also for an event
