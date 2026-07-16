@@ -527,9 +527,12 @@ class Summarizer:
             "with a bolded 2-4 word label followed by a colon.\n\n"
             "Cover the whole day — do not drop threads that only appear in one "
             "hour. EPISODE RULE: anything the summaries attribute to the TV "
-            "episode/broadcast is an edited replay of PAST days — never present "
-            "it as a new event from this day. The only new facts an episode "
-            "produces are a Block Buster result or an eviction.\n\n"
+            "episode/broadcast (DR confessionals, comp footage, montages, 'the "
+            "episode showed...') is an edited replay of PAST days — never "
+            "present it as a new event from this day. Live-feed events that "
+            "merely happened while an episode aired are real; feeds stay live "
+            "except during Thursday's live show, whose only new facts are a "
+            "Block Buster result or an eviction.\n\n"
             f"HOURLY SUMMARIES:\n\n{body}"
         )
         text = await self.llm.text(system, user, max_tokens=2500, heavy=True)
@@ -644,8 +647,15 @@ class Summarizer:
     async def _llm_digest(self, updates: list[Update], hour_label: str,
                           house_context: str) -> discord.Embed | None:
         def line(u):
-            tag = ("[EPISODE AIRING] "
-                   if self.episode_window and self.episode_window(u.published_at)
+            # Feeds stay LIVE during Sun/Wed airings — only the Thursday live
+            # show takes them down — so a time window alone would smear real
+            # feed events. Jokers' timestamped lines are feed reports by
+            # construction; it's the social accounts that live-tweet the
+            # broadcast. So: tag only bluesky updates inside an air window,
+            # and let the model judge the content.
+            tag = ("[DURING EPISODE AIRING] "
+                   if (u.source == "bluesky" and self.episode_window
+                       and self.episode_window(u.published_at))
                    else "")
             return f"- {tag}{u.text}"
         body = "\n".join(line(u) for u in sorted(updates, key=lambda u: u.published_at))
@@ -663,13 +673,16 @@ class Summarizer:
             "- Group related updates together; never repeat the same point under "
             "two headers. One group is fine if that's all there is.\n"
             "- No intro or closing paragraph — start straight at the first header.\n"
-            "- Lines tagged [EPISODE AIRING] are updaters narrating the TV "
-            "broadcast — an edited replay of events from EARLIER days (comp "
-            "footage, Diary Room bits, reaction montages). Never report them as "
-            "happening this hour; at most one bullet under **Episode Watch** "
-            "noting what tonight's episode covered. The ONLY new facts a live "
-            "Thursday episode produces are the Block Buster result and the "
-            "eviction result.\n\n"
+            "- Lines tagged [DURING EPISODE AIRING] were posted while a TV "
+            "episode aired. Feeds stay live during Sunday/Wednesday episodes, so "
+            "such a line is EITHER narration of the broadcast (comp footage, "
+            "Diary Room bits, reaction montages — an edited replay of EARLIER "
+            "days) OR a genuine live-feed report. Judge by content: broadcast "
+            "narration must never be reported as happening this hour — at most "
+            "one bullet under **Episode Watch** noting what the episode covered. "
+            "The ONLY new facts a live Thursday episode produces are the Block "
+            "Buster result and the eviction result; the first half of live "
+            "episodes re-covers events feed-watchers already know.\n\n"
             f"UPDATES:\n{body}"
         )
         text = await self.llm.text(system, user, max_tokens=1600)
