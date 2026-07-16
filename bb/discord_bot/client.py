@@ -118,7 +118,8 @@ class BBBot(commands.Bot):
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
         self.pipeline = IngestPipeline(self.db, sources)
         self.extractor = Extractor(self.llm, self.roster)
-        self.summarizer = Summarizer(self.llm, self.house_tz, self.roster)
+        self.summarizer = Summarizer(self.llm, self.house_tz, self.roster,
+                                     episode_window=season.in_episode_window)
         self.alliances = AllianceTracker(self.db)
         self.relationships = RelationshipTracker(self.db)
         self.game_state = GameStateTracker(self.db, season.start_date,
