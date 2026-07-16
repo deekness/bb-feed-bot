@@ -7,7 +7,7 @@ from the season start date.
 from __future__ import annotations
 
 import logging
-from datetime import date
+from datetime import date, datetime
 
 from ..db import Database
 
@@ -29,13 +29,25 @@ _REQUIRES = {"replacement_nominee": "veto_used_on"}
 
 class GameStateTracker:
     def __init__(self, db: Database, season_start: date,
-                 house_day_one: date | None = None):
+                 house_day_one: date | None = None,
+                 house_tz=None):
         self.db = db
         self.season_start = season_start        # premiere — drives WEEK math
         self.house_day_one = house_day_one      # move-in — drives DAY math
+        self.house_tz = house_tz                # week/day math is HOUSE time
+
+    def _today(self) -> date:
+        """Today in house time. date.today() on the server is UTC, which rolls
+        over at 7 PM Central — so week/day numbers flipped hours early every
+        Wednesday night. That made the breaking stale-gate look at an empty
+        'week 2', and episode-retell game events were WRITTEN into week 2,
+        poisoning it before it began."""
+        if self.house_tz is not None:
+            return datetime.now(self.house_tz).date()
+        return date.today()
 
     def current_week(self, today: date | None = None) -> int:
-        today = today or date.today()
+        today = today or self._today()
         return max(1, ((today - self.season_start).days // 7) + 1)
 
     def current_day(self, today: date | None = None) -> int:
@@ -43,7 +55,7 @@ class GameStateTracker:
         day, which is several days before the premiere airs — so counting from
         the premiere made the bot's "Day 3" collide with the feeds' "Day 5".
         Falls back to the premiere date when house_day_one isn't configured."""
-        today = today or date.today()
+        today = today or self._today()
         day_one = self.house_day_one or self.season_start
         return max(1, (today - day_one).days + 1)
 
