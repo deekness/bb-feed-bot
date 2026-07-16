@@ -151,6 +151,13 @@ class BBBot(commands.Bot):
         # chatter landed in "week 2" while the UTC clock bug was live; any row
         # beyond the current house week is garbage by definition.
         wk = self.game_state.current_week()
+        # Roll back a premature weekly-recap marker (the old day-count math
+        # recorded week N as recapped on eviction morning, before it ended).
+        # This lets the proper recap — eviction included — post after the flip.
+        lw = int(await self.db.kv_get("last_weekly") or 0)
+        if lw >= wk:
+            await self.db.kv_set("last_weekly", wk - 1)
+            log.warning("rolled back premature weekly-recap marker %d -> %d", lw, wk - 1)
         res = await self.db.execute("DELETE FROM game_state WHERE week > $1", wk)
         try:
             purged = int(res.split()[-1])
@@ -1008,19 +1015,29 @@ class BBBot(commands.Bot):
             # on the boundary morning, the recap self-heals the next morning
             # instead of being dropped. Window is computed from the week
             # number (same math as /week), not "last 7 days from now".
-            completed = (today_house - self.season.start_date).days // 7
+            # A game week completes at the Thursday eviction (19:30 house
+            # time flip), NOT at midnight day 7 — the old day-count math
+            # recapped week 1 on eviction MORNING, before the eviction. The
+            # first daily loop after the flip is Friday ~7am, so the recap
+            # lands with the eviction included.
+            completed = self.game_state.current_week() - 1
             last_weekly = int(await self.db.kv_get("last_weekly") or 0)
             if completed >= 1 and completed > last_weekly:
                 await self.db.kv_set("last_weekly", completed)
-                wk_start_date = self.season.start_date + dt.timedelta(days=7 * (completed - 1))
-                wk_end_date = wk_start_date + dt.timedelta(days=7)
+                flip = dt.time(19, 30)
                 wk_start = dt.datetime.combine(
-                    wk_start_date, dt.time.min, self.house_tz).astimezone(dt.timezone.utc)
+                    self.season.start_date + dt.timedelta(days=7 * (completed - 1)),
+                    flip, self.house_tz).astimezone(dt.timezone.utc)
                 wk_end = dt.datetime.combine(
-                    wk_end_date, dt.time.max, self.house_tz).astimezone(dt.timezone.utc)
+                    self.season.start_date + dt.timedelta(days=7 * completed),
+                    flip, self.house_tz).astimezone(dt.timezone.utc)
                 dailies = await self.db.summaries_between("daily", wk_start, wk_end)
+                # Weekly recaps go to the briefing channel; dailies stay in the
+                # recap channel.
+                wchannel = await self.briefing_channel()
                 wembed = await self.summarizer.weekly_recap(dailies, completed, context)
-                await channel.send(embed=wembed)
+                if wchannel:
+                    await wchannel.send(embed=wembed)
         except Exception as e:
             log.error("daily loop error: %s", e)
 
