@@ -607,14 +607,21 @@ class Summarizer:
         user = (
             f"{self._ctx(house_context)}"
             f"Below are the daily recaps for week {week_number} in the Big Brother "
-            "house. Write the week's story:\n"
-            "1. A paragraph on the week's arc (HOH -> noms -> veto -> eviction if "
-            "known), using the CURRENT HOUSE STATE — alliances, relationship beats, "
-            "betrayals, the vote board — to explain the power shifts, not just the "
-            "sequence of comps.\n"
-            "2. 5-8 bullets of key developments, chronological.\n"
-            f"3. One line on where things stand going into next week.\n\nDAILY RECAPS:\n\n{blocks}"
-        )
+            "house. Write the week's story — scannable, never a wall of text.\n"
+            "EXACT STRUCTURE:\n"
+            "1. **A one-line hook** in bold — the sentence that captures the week.\n"
+            "2. 'The Arc' — the week's story in 3-4 SHORT paragraphs of 2-4 "
+            "sentences each, one thread per paragraph (the HOH and her plan; the "
+            "veto and its fallout; the social/alliance shifts; the vote). Blank "
+            "line between paragraphs. NEVER write a paragraph longer than 4 "
+            "sentences — split it. Use the CURRENT HOUSE STATE to explain the "
+            "power shifts, not just the sequence of comps.\n"
+            "3. 5-8 bullets of key developments, chronological, each starting "
+            "with a bolded 2-4 word label and a colon.\n"
+            "4. One short 'going into next week' paragraph. GAME RULE: the "
+            "outgoing HOH cannot compete in the next HOH — never describe them "
+            "as holding power going forward.\n\nDAILY RECAPS:\n\n{blocks}"
+        ).replace("{blocks}", blocks)
         text = await self.llm.text(_NEUTRALITY, user, max_tokens=2500, heavy=True)
         embed = discord.Embed(
             title=f"📆 Week {week_number} Recap",
