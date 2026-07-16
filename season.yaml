@@ -22,6 +22,22 @@ house_day_one: "2026-07-07"
 # Usual feeds blocks (Pacific): Mon ~noon veto meeting · Thu afternoon run-thru +
 # 5pm live show · Fri late-afternoon noms · Sat morning veto draw + afternoon comp.
 
+# Episode air windows in HOUSE time (US/Pacific). Updates ingested during these
+# (plus a tail while updaters finish recapping) are usually TV re-narration of
+# events from EARLIER days — flagged so summaries don't report them as new.
+# weekday: 0=Mon .. 6=Sun
+episode_air_windows:
+  weekly:
+    - {weekday: 6, start: "17:00", minutes: 60}    # Sunday
+    - {weekday: 2, start: "17:00", minutes: 90}    # Wednesday
+    - {weekday: 3, start: "17:00", minutes: 60}    # Thursday LIVE
+  exceptions:
+    - {date: "2026-08-23", start: "17:00", minutes: 120}
+    - {date: "2026-08-27", start: "17:00", minutes: 90}
+    - {date: "2026-09-10", start: "17:00", minutes: 120}
+    - {date: "2026-09-16", start: "17:00", minutes: 120}
+  tail_minutes: 45
+
 # Live-feed updates RSS feed (Jokers Updates).
 rss_url: "https://rss.jokersupdates.com/ubbthreads/rss/bbusaupdates/rss.php"
 
