@@ -43,6 +43,8 @@ URGENT_KEYWORDS = (
     # comp results
     "wins hoh", "won hoh", "wins the hoh", "is the new hoh", "new hoh",
     "wins head of household", "won head of household",
+    "wins the block buster", "won the block buster", "wins block buster",
+    "won block buster", "wins the blockbuster", "won the blockbuster",
     "wins veto", "won veto", "wins the veto", "won the veto", "wins pov",
     "won pov", "wins the pov", "won the power of veto", "wins the power of veto",
     "won the golden power of veto", "wins the golden power of veto",
@@ -220,6 +222,9 @@ _EVENT_CATEGORY = (
     ("nominations",  ("nomination ceremony", "has been nominated",
                       "nominated for eviction", "final nominees")),
     ("eviction",     ("evicted", "eviction results", "has been evicted")),
+    ("block_buster", ("wins the block buster", "won the block buster",
+                      "wins block buster", "won block buster",
+                      "wins the blockbuster", "won the blockbuster")),
     ("exit",         ("self-evict", "self-evicted", "expelled", "ejected",
                       "walked out", "quit the game", "removed from the house",
                       "removed from the game")),

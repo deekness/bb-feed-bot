@@ -97,7 +97,7 @@ _SCHEMA = {
                     "role": {"type": "string",
                              "enum": ["hoh", "nominee", "veto_winner",
                                       "veto_used_on", "evicted", "replacement_nominee",
-                                      "have_not"]},
+                                      "have_not", "block_buster"]},
                     "houseguest": {"type": "string"},
                     "confidence": {"type": "number"},
                     "evidence": {"type": "string"},
@@ -193,7 +193,15 @@ class Extractor:
             "veto comp or ceremony has not happened yet, there is no replacement "
             "nominee — omit it entirely.\n"
             "- 'nominee' means someone actually nominated at the nomination "
-            "ceremony, not someone people are discussing nominating.\n"            "- 'have_not' records each houseguest who IS a Have-Not this week "
+            "ceremony, not someone people are discussing nominating. The update "
+            "must say the CEREMONY HAPPENED (feeds cut for it / feeds return "
+            "with noms official). 'Named his picks', 'decided on', 'plans to "
+            "nominate', 'told X they're going up' are PLANS — never record "
+            "them. The same completed-ceremony bar applies to veto_used_on and "
+            "replacement_nominee.\n"
+            "- 'block_buster' is the houseguest who won the Block Buster comp "
+            "on eviction night (saving themselves from the vote). The Block "
+            "Buster is NOT the veto — never record its winner as veto_winner.\n"            "- 'have_not' records each houseguest who IS a Have-Not this week "
             "(slop, cold showers, have-not room) — decided fact, one entry per "
             "houseguest, not volunteers being discussed.\n"
             "- A vote plan requires the voter stating or clearly implying who they "
