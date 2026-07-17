@@ -21,6 +21,10 @@ house_day_one: "2026-07-07"
 # BB Unlocked: Fri Jul 24 8p · Fri Aug 7 8p · Sun Aug 23 9p · Fri Sep 4 8p · Fri Sep 18 9p.
 # Usual feeds blocks (Pacific): Mon ~noon veto meeting · Thu afternoon run-thru +
 # 5pm live show · Fri late-afternoon noms · Sat morning veto draw + afternoon comp.
+# Rough ceremony/outage timing (Pacific, subject to change):
+#   Mon ~11:00 veto ceremony (~1.5h) · Thu 11:00 HOH lockdown + ~14:00 again ·
+#   Fri ~15:00 nominations (~1.5h) · Sat ~09:00 veto picks (45m),
+#   ~12:00 veto comp (~3h; individual-timed comps up to ~6h).
 
 # Episode air windows in HOUSE time (US/Pacific). Updates ingested during these
 # (plus a tail while updaters finish recapping) are usually TV re-narration of
