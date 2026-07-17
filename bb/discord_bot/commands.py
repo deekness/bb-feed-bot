@@ -224,6 +224,8 @@ class BBCommands(commands.Cog):
             lines.append(f"🔁 **Renom**  {', '.join(state['replacement_nominee'])}")
         if state.get("have_not"):
             lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
+        if state.get("block_buster"):
+            lines.append(f"🧱 **Block Buster**  {', '.join(state['block_buster'])} — saved themselves")
         if state.get("evicted"):
             lines.append(f"🚪 **Evicted**  {', '.join(state['evicted'])}")
 
@@ -663,7 +665,7 @@ class BBCommands(commands.Cog):
         await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="setgamestate", description="(Admin) Record a game-state fact (fix a miss).")
-    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee",
+    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee / have_not / block_buster",
                            houseguest="Houseguest name", week="Week number (default: current)")
     async def setgamestate(self, interaction: discord.Interaction, role: str,
                            houseguest: str, week: int | None = None):
@@ -671,7 +673,8 @@ class BBCommands(commands.Cog):
             await interaction.response.send_message("Admins only.", ephemeral=True)
             return
         role = role.strip().lower()
-        valid = ("hoh", "nominee", "veto_winner", "veto_used_on", "evicted", "replacement_nominee")
+        valid = ("hoh", "nominee", "veto_winner", "veto_used_on", "evicted",
+                 "replacement_nominee", "have_not", "block_buster")
         if role not in valid:
             await interaction.response.send_message(
                 f"Role must be one of: {', '.join(valid)}", ephemeral=True)
@@ -687,7 +690,7 @@ class BBCommands(commands.Cog):
             f"✅ Set: week {wk} {role} = {name}", ephemeral=True)
 
     @app_commands.command(name="removegamestate", description="(Admin) Delete a wrong game-state fact.")
-    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee",
+    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee / have_not / block_buster",
                            houseguest="Houseguest name", week="Week number (default: current)")
     async def removegamestate(self, interaction: discord.Interaction, role: str,
                               houseguest: str, week: int | None = None):

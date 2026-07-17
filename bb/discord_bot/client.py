@@ -667,7 +667,11 @@ class BBBot(commands.Bot):
     # breaking category -> the game_state role that proves it already happened
     _BREAKING_ROLE = {"hoh_win": "hoh", "veto_win": "veto_winner",
                       "veto_ceremony": "veto_used_on",
-                      "nominations": "nominee", "eviction": "evicted"}
+                      "nominations": "nominee", "eviction": "evicted",
+                      "block_buster": "block_buster"}
+    # Eviction-night results are booked to the week they CLOSED, so their
+    # staleness check must look back one week too.
+    _CLOSING_CATEGORIES = ("eviction", "block_buster")
 
     # A recorded fact only makes news "stale" once it has AGED. Extraction and
     # the Breaking scan run in the same loop, and extraction is less picky — it
@@ -682,9 +686,11 @@ class BBBot(commands.Bot):
         role = self._BREAKING_ROLE.get(category)
         if not role:
             return False          # blowups/twists have no game-state record
+        wk = self.game_state.current_week()
+        weeks = [wk, wk - 1] if category in self._CLOSING_CATEGORIES else [wk]
         recorded_at = await self.db.fetchval(
-            "SELECT max(set_at) FROM game_state WHERE week = $1 AND role = $2",
-            self.game_state.current_week(), role)
+            "SELECT max(set_at) FROM game_state WHERE week = ANY($1) AND role = $2",
+            weeks, role)
         if recorded_at is None:
             return False
         age = (dt.datetime.now(dt.timezone.utc) - recorded_at).total_seconds()
