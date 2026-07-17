@@ -736,7 +736,18 @@ class Summarizer:
     def _ctx(house_context: str) -> str:
         if not house_context:
             return ""
-        return f"CURRENT HOUSE STATE (for context, do not re-report):\n{house_context}\n\n"
+        return (
+            f"CURRENT HOUSE STATE (for context, do not re-report):\n{house_context}\n"
+            "OFFICIAL vs PLANNED: the state above is the OFFICIAL record — "
+            "ceremonies and comps that actually happened. Nominations, veto "
+            "decisions and renoms only become official at their ceremony "
+            "(feeds cut for it). If something isn't in the state above, then "
+            "however unanimous the house sounds, it is still a PLAN: say "
+            "'the plan is to nominate X' / 'X is the intended renom' — never "
+            "'X is on the block', 'nominations are locked in', or a day label "
+            "implying it happened. DO keep reporting plans and targets — "
+            "that's the good intel — just never dress a plan as a done "
+            "ceremony.\n\n")
 
     # --- pattern fallbacks --------------------------------------------------
     def _pattern_digest(self, updates: list[Update], hour_label: str) -> discord.Embed:
