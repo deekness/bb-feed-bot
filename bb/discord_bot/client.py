@@ -669,12 +669,26 @@ class BBBot(commands.Bot):
                       "veto_ceremony": "veto_used_on",
                       "nominations": "nominee", "eviction": "evicted"}
 
+    # A recorded fact only makes news "stale" once it has AGED. Extraction and
+    # the Breaking scan run in the same loop, and extraction is less picky — it
+    # recorded Devens as HOH from early feeds-return chatter, so one cycle
+    # later the explicit "Devens won HOH" update hit this gate and was
+    # swallowed as old news. Fresh records are the SAME news wave: let the
+    # alert fire (the event-keyed cooldown and LLM dedupe prevent doubles).
+    # Episode retells arrive days later and still die here.
+    BREAKING_STALE_AFTER_S = 90 * 60
+
     async def _breaking_is_stale(self, category: str) -> bool:
         role = self._BREAKING_ROLE.get(category)
         if not role:
             return False          # blowups/twists have no game-state record
-        state = await self.game_state.current(self.game_state.current_week())
-        return bool(state.get(role))
+        recorded_at = await self.db.fetchval(
+            "SELECT max(set_at) FROM game_state WHERE week = $1 AND role = $2",
+            self.game_state.current_week(), role)
+        if recorded_at is None:
+            return False
+        age = (dt.datetime.now(dt.timezone.utc) - recorded_at).total_seconds()
+        return age > self.BREAKING_STALE_AFTER_S
 
     async def house_context(self) -> str:
         """Short current-state block injected into extraction and summary
