@@ -747,13 +747,15 @@ class Summarizer:
             "ceremonies and comps that actually happened. Nominations, veto "
             "decisions and renoms only become official at their ceremony "
             "(feeds cut for it). If something isn't in the state above, then "
-            "however unanimous the house sounds, it is still a PLAN. State "
-            "plans in ONE clean clause: 'The plan: Devens intends to nominate "
-            "Lyric, Jason and Melody at today's ceremony.' Never 'X is on the "
-            "block', 'locked in', 'named as his picks', 'initial picks', or "
-            "'expected to finalize' — those blur plan and fact. DO keep "
-            "reporting plans and targets — that's the good intel — just say "
-            "plainly that the ceremony hasn't happened yet.\n\n")
+            "however unanimous the house sounds, it is still a plan. Let the "
+            "VERB carry that quietly: 'Devens intends to nominate Lyric, Jason "
+            "and Melody' / 'the plan is a Rome backdoor'. Never 'X is on the "
+            "block', 'locked in', or 'named his picks' for an unheld ceremony "
+            "— but ALSO never announce the un-officialness ('nothing is "
+            "official yet', 'the ceremony hasn't happened', 'no nominations "
+            "have been made') as its own statement or headline. Intent "
+            "phrasing alone tells the reader; don't narrate the distinction."
+            "\n\n")
 
     # --- pattern fallbacks --------------------------------------------------
     def _pattern_digest(self, updates: list[Update], hour_label: str) -> discord.Embed:
