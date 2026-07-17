@@ -17,7 +17,7 @@ _MIN_CONFIDENCE = 0.6  # ignore low-confidence game-state guesses
 
 # Insertion order within a batch: prerequisites land before the roles that
 # depend on them, so a single update reporting a full veto ceremony still works.
-_ROLE_ORDER = {"hoh": 0, "have_not": 1, "nominee": 1, "veto_winner": 2, "veto_used_on": 3,
+_ROLE_ORDER = {"hoh": 0, "have_not": 1, "block_buster": 1, "nominee": 1, "veto_winner": 2, "veto_used_on": 3,
                "replacement_nominee": 4, "evicted": 5}
 
 # Causal prerequisites. In Big Brother a replacement nominee CANNOT exist unless
@@ -81,16 +81,27 @@ class GameStateTracker:
             "SELECT 1 FROM game_state WHERE week = $1 AND role = $2 LIMIT 1",
             week, role))
 
+    # Eviction-night results (the eviction itself, the Block Buster) happen
+    # DURING the Thursday show, but feeds are down and the news is only
+    # ingested after feeds return — which is AFTER the 19:30 week flip. Booking
+    # them at the current week filed Ashley's eviction under week 2. These
+    # roles close a week, so they're booked to the week that was live 12 hours
+    # earlier.
+    _CLOSING_ROLES = ("evicted", "block_buster")
+
     async def ingest(self, events: list) -> None:
         week = self.current_week()
+        closing_week = self.current_week(
+            datetime.now(self.house_tz or None) - timedelta(hours=12))
         # Prerequisites first, so a batch that reports the whole veto ceremony
         # (veto used AND the replacement) still records both.
         events = sorted(events, key=lambda e: _ROLE_ORDER.get(e.role, 99))
         for e in events:
             if e.confidence < _MIN_CONFIDENCE:
                 continue
+            wk = closing_week if e.role in self._CLOSING_ROLES else week
             prereq = _REQUIRES.get(e.role)
-            if prereq and not await self._has_role(week, prereq):
+            if prereq and not await self._has_role(wk, prereq):
                 log.info("rejected %s=%s: no %s recorded this week (likely a "
                          "rumored plan, not a completed ceremony)",
                          e.role, e.houseguest, prereq)
@@ -103,7 +114,7 @@ class GameStateTracker:
                     ON CONFLICT (week, role, houseguest) DO UPDATE
                     SET confidence = GREATEST(game_state.confidence, EXCLUDED.confidence)
                     """,
-                    week, e.role, e.houseguest, e.confidence,
+                    wk, e.role, e.houseguest, e.confidence,
                     getattr(e, "source_hash", ""),
                 )
             except Exception as ex:
