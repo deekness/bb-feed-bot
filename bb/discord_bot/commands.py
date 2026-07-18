@@ -222,6 +222,16 @@ class BBCommands(commands.Cog):
             lines.append(f"💎 **Veto**  used on {', '.join(vu)}")
         if state.get("replacement_nominee"):
             lines.append(f"🔁 **Renom**  {', '.join(state['replacement_nominee'])}")
+        tc_pow = state.get("time_capsule_power", [])
+        tc_pun = state.get("time_capsule_punishment", [])
+        tc_sel = [n for n in state.get("time_capsule", [])
+                  if n not in tc_pow and n not in tc_pun]
+        if tc_pow or tc_pun or tc_sel:
+            bits = []
+            bits += [f"{n} — won a power" for n in tc_pow]
+            bits += [f"{n} — lost, has a punishment" for n in tc_pun]
+            bits += [f"{n} — outcome TBD" for n in tc_sel]
+            lines.append(f"🕰️ **Time Capsule**  {'; '.join(bits)}")
         if state.get("have_not"):
             lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
         if state.get("block_buster"):
@@ -674,7 +684,8 @@ class BBCommands(commands.Cog):
             return
         role = role.strip().lower()
         valid = ("hoh", "nominee", "veto_winner", "veto_used_on", "evicted",
-                 "replacement_nominee", "have_not", "block_buster")
+                 "replacement_nominee", "have_not", "block_buster",
+                 "time_capsule", "time_capsule_power", "time_capsule_punishment")
         if role not in valid:
             await interaction.response.send_message(
                 f"Role must be one of: {', '.join(valid)}", ephemeral=True)
