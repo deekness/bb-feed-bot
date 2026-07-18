@@ -97,7 +97,8 @@ _SCHEMA = {
                     "role": {"type": "string",
                              "enum": ["hoh", "nominee", "veto_winner",
                                       "veto_used_on", "evicted", "replacement_nominee",
-                                      "have_not", "block_buster"]},
+                                      "have_not", "block_buster", "time_capsule",
+                                      "time_capsule_power", "time_capsule_punishment"]},
                     "houseguest": {"type": "string"},
                     "confidence": {"type": "number"},
                     "evidence": {"type": "string"},
@@ -199,6 +200,13 @@ class Extractor:
             "nominate', 'told X they're going up' are PLANS — never record "
             "them. The same completed-ceremony bar applies to veto_used_on and "
             "replacement_nominee.\n"
+            "- TIME CAPSULE twist: America votes weekly for one houseguest to "
+            "open the Time Capsule and play a game. Record the chosen houseguest "
+            "as 'time_capsule'. If they WIN the game they earn a power — record "
+            "'time_capsule_power'. If they LOSE they get a punishment (often a "
+            "costume) — record 'time_capsule_punishment'. A Time Capsule "
+            "punishment or costume does NOT make someone a have_not: 'have_not' "
+            "is ONLY the weekly slop/cold-shower selection.\n"
             "- 'block_buster' is the houseguest who won the Block Buster comp "
             "on eviction night (saving themselves from the vote). The Block "
             "Buster is NOT the veto — never record its winner as veto_winner.\n"            "- 'have_not' records each houseguest who IS a Have-Not this week "
