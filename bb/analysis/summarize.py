@@ -15,6 +15,7 @@ weighted differently from any other.
 """
 from __future__ import annotations
 
+import asyncio
 import logging
 import re
 from datetime import datetime
@@ -302,6 +303,14 @@ class Summarizer:
             return []
         if self.llm.available:
             embed = await self._llm_digest(updates, hour_label, house_context)
+            if embed is None:
+                # 529 Overloaded is usually gone within a minute (the SDK's
+                # three quick retries all land inside ~25s of the same
+                # congestion). One patient retry beats posting the raw-list
+                # fallback for a transient blip.
+                log.warning("hourly digest failed — retrying once in 90s")
+                await asyncio.sleep(90)
+                embed = await self._llm_digest(updates, hour_label, house_context)
             if embed:
                 return [embed]
         return [self._pattern_digest(updates, hour_label)]
@@ -541,6 +550,12 @@ class Summarizer:
             f"HOURLY SUMMARIES:\n\n{body}"
         )
         text = await self.llm.text(system, user, max_tokens=2500, heavy=True)
+        if not text:
+            # transient API congestion (529s) usually clears within a minute —
+            # the daily recap is a flagship post, worth one patient retry.
+            log.warning("daily recap failed — retrying once in 120s")
+            await asyncio.sleep(120)
+            text = await self.llm.text(system, user, max_tokens=2500, heavy=True)
         if not text:
             embed = await self.whats_happening(fallback_updates, house_context)
             embed.title = f"Day {day_number} Recap"
