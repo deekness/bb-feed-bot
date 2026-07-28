@@ -424,11 +424,9 @@ class Summarizer:
         """A "what you need to know" brief: where the game STANDS right now,
         rather than what happened in order (that's the daily recap's job).
 
-        Deliberately hybrid. The numbered list is written by the model from the
-        last day's summaries, but the alliance map and relationship beats are
-        rendered DIRECTLY from the trackers — they're facts the bot already
-        holds, so there's nothing for the model to get wrong. That tracked map
-        is the thing a human writing this by hand can't easily reproduce.
+        The numbered list is written by the model from the last day's
+        summaries. The tracked alliance map and relationship beats are NOT
+        repeated here — /alliances and /relationship own that.
         """
         if not self.llm.available or not hourly_summaries:
             return None
@@ -462,36 +460,10 @@ class Summarizer:
         if not text:
             return None
 
-        parts = [sentence_clamp(drop_orphan_tail(strip_links(text)), 2200)]
-
-        # Alliance map — straight from the tracker, no LLM in the loop.
-        if alliances:
-            lines = []
-            for a in alliances[:8]:
-                members = "/".join(a["members"])
-                name = f"**{a['name']}** ({members})" if a.get("name") else f"**{members}**"
-                tags = []
-                if len(a["members"]) == 2:
-                    tags.append("duo")
-                note = one_sided_note(a)
-                if note:
-                    tags.append(f"⚠️ {note}")
-                if a.get("status") == "fracturing":
-                    tags.append("fracturing")
-                suffix = f" — _{', '.join(tags)}_" if tags else ""
-                lines.append(f"- {name}{suffix} · {a['confidence']:.0%}")
-            parts.append("**The alliance map**\n" + "\n".join(lines))
-
-        # Relationship beats — also straight from the tracker.
-        if relationships:
-            beats = []
-            for r in relationships[:6]:
-                label = r.get("label") or ""
-                if not label:
-                    continue
-                beats.append(f"- {r['hg_a']} & {r['hg_b']} — {label}")
-            if beats:
-                parts.append("**Where they stand**\n" + "\n".join(beats))
+        # Just the numbered list. The tracked alliance map and relationship
+        # beats live in /alliances and /relationship — repeating them here made
+        # the briefing long and duplicative.
+        parts = [sentence_clamp(drop_orphan_tail(strip_links(text)), 3800)]
 
         embed = discord.Embed(
             title=f"Need to know — Day {day_number}",
