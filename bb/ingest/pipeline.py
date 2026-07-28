@@ -37,6 +37,7 @@ class IngestPipeline:
 
     async def run(self) -> list[Update]:
         collected: list[Update] = []
+        per_source: dict[str, int] = {}       # surfaced in the ingest log line
         for src in self.sources:
             if not self._due(src):
                 continue
@@ -44,6 +45,7 @@ class IngestPipeline:
             try:
                 items = await src.fetch()
                 collected.extend(items)
+                per_source[src.name] = len(items)
                 log.debug("%s returned %d items", src.name, len(items))
             except Exception as e:
                 log.error("source %s failed: %s", getattr(src, "name", "?"), e)
@@ -56,5 +58,7 @@ class IngestPipeline:
             except Exception as e:
                 log.error("store failed for %s: %s", u.content_hash[:8], e)
         if new:
-            log.info("ingested %d new updates (from %d fetched)", len(new), len(collected))
+            log.info("ingested %d new updates (from %d fetched: %s)",
+                     len(new), len(collected),
+                     ", ".join(f"{k}={v}" for k, v in per_source.items()) or "-")
         return new
