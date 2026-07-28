@@ -607,6 +607,26 @@ class BBCommands(commands.Cog):
                 ephemeral=True)
             return
         upd = self.bot.db._to_update(rows[0])
+
+        # The stored copy may be the feed's TEASER — e.g. it was ingested
+        # before full-article reading existed, and dedupe means it will never
+        # be re-read. Pull the article fresh from the live feed and use that.
+        if len((upd.body or "")) < 600:
+            src = next((x for x in self.bot.pipeline.sources
+                        if getattr(x, "name", None) in srcs), None)
+            if src is not None:
+                src._etag = None            # bypass conditional GET
+                src._last_modified = None
+                try:
+                    fresh = await src.fetch()
+                except Exception as e:
+                    log.warning("report refresh failed: %s", e)
+                    fresh = []
+                match = next((f for f in fresh if f.link == upd.link), None)
+                if match and len(match.body or "") > len(upd.body or ""):
+                    await self.bot.db.add_update(match)   # keep the full text
+                    upd = match
+
         proposals = await self.bot.extractor.parse_alliance_report(upd)
         named = [a for a in proposals if a.name]
         if not named:
