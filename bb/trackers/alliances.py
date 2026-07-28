@@ -368,6 +368,33 @@ class AllianceTracker:
         )
         return _rowcount(result) > 0
 
+    async def _best_unnamed(self, members: list[str]):
+        """Best-matching LIVE, UNNAMED alliance for this roster, or None.
+
+        Deliberately NOT _best_match: that one considers every alliance ever
+        recorded, including dissolved groups and named ones, so a stale row
+        could win the match and block adoption — which is how a duplicate
+        Toolshed got created next to the identical unnamed group.
+        """
+        rows = await self.db.fetch(
+            """
+            SELECT a.id, array_agg(m.houseguest) AS members
+            FROM alliances a
+            JOIN alliance_members m ON m.alliance_id = a.id AND m.active
+            WHERE a.name IS NULL AND a.status IN ('forming', 'active')
+            GROUP BY a.id
+            """)
+        mset, best, best_j = set(members), None, 0.0
+        for r in rows:
+            rset = set(r["members"])
+            if len(rset) < 3 and len(mset) != len(rset):
+                continue            # duos never absorb into bigger groups
+            overlap = len(mset & rset)
+            j = overlap / len(mset | rset)
+            if overlap >= self.MERGE_OVERLAP and j >= self.JACCARD_MIN and j > best_j:
+                best, best_j = r, j
+        return best
+
     async def apply_report(self, proposals: list, source_hash: str = "") -> int:
         """Apply an AUTHORITATIVE alliance report (a site's published roster).
 
@@ -399,18 +426,19 @@ class AllianceTracker:
                 # name. Adopt that group and christen it rather than creating
                 # a duplicate beside it. Only unnamed groups are adopted: a
                 # differently-named alliance is a distinct entity.
-                m = await self._best_match(members, None)
-                if m is not None and not m["name"]:
+                m = await self._best_unnamed(members)
+                if m is not None:
                     if not await self._name_taken_by_other(name, m["id"]):
                         await self.db.execute(
                             "UPDATE alliances SET name = $2 WHERE id = $1",
                             m["id"], name)
-                        log.info("alliance report: named existing group #%s %r",
-                                 m["id"], name)
+                    log.info("alliance report: adopted existing group #%s as %r",
+                             m["id"], name)
                     row = await self.db.fetchrow(
                         "SELECT id, locked, status FROM alliances WHERE id = $1",
                         m["id"])
                 else:
+                    log.info("alliance report: creating new group %r", name)
                     await self._create(p)
                     row = await self.db.fetchrow(find, name)
                 if row is None:
