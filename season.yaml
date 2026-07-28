@@ -94,6 +94,10 @@ extra_rss_feeds:
     url: "https://feeds.feedburner.com/bigbrothernetwork"
     use_content: true
     digest: true
+    # Its "Alliances and Deals Report" is a deliberate full-roster write-up, so
+    # for the groups it NAMES it overrides the tracker (members it omits are
+    # dropped). Only that article counts — ordinary posts are normal evidence.
+    alliance_authority: true
     poll_interval_s: 900
 
 # ----------------------------------------------------------------------------
