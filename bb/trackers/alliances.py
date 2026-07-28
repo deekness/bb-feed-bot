@@ -31,6 +31,7 @@ are always recorded regardless.
 from __future__ import annotations
 
 import logging
+import re
 
 from ..db import Database
 
@@ -40,13 +41,24 @@ log = logging.getLogger("bb.trackers.alliances")
 def norm_name(name) -> str:
     """Canonical alliance name for comparison: case-folded, and a leading
     'the ' dropped. Sites write 'The Red Corner' where the house says 'Red
-    Corner' — without this they become two separate alliances."""
-    n = str(name or "").strip().lower()
-    return n[4:].strip() if n.startswith("the ") else n
+    Corner' — without this they become two separate alliances.
 
+    Punctuation and spacing are dropped too: sites write "The Handymen" where
+    the tracker holds "The Handy Men", and "Mama's Angels" / "Mamas Angels"
+    are one group. The leading "the" is removed as a WORD first, so a name
+    like "Theodore Group" survives intact.
+    """
+    n = str(name or "").strip().lower()
+    if n.startswith("the "):
+        n = n[4:]
+    return _NON_ALNUM.sub("", n)
+
+
+_NON_ALNUM = re.compile(r"[^a-z0-9]+")
 
 # Same normalization, SQL-side, for matching against stored names.
-_NORM_SQL = "regexp_replace(lower(btrim({col})), '^the\\s+', '')"
+_NORM_SQL = ("regexp_replace(regexp_replace(lower(btrim({col})), '^the\\s+', ''),"
+             " '[^a-z0-9]+', '', 'g')")
 
 
 class AllianceTracker:
@@ -382,8 +394,25 @@ class AllianceTracker:
                     f"ORDER BY id LIMIT 1")
             row = await self.db.fetchrow(find, name)
             if row is None:
-                await self._create(p)
-                row = await self.db.fetchrow(find, name)
+                # The group may already be tracked but UNNAMED — the house
+                # scheming gets picked up long before anyone publishes the
+                # name. Adopt that group and christen it rather than creating
+                # a duplicate beside it. Only unnamed groups are adopted: a
+                # differently-named alliance is a distinct entity.
+                m = await self._best_match(members, None)
+                if m is not None and not m["name"]:
+                    if not await self._name_taken_by_other(name, m["id"]):
+                        await self.db.execute(
+                            "UPDATE alliances SET name = $2 WHERE id = $1",
+                            m["id"], name)
+                        log.info("alliance report: named existing group #%s %r",
+                                 m["id"], name)
+                    row = await self.db.fetchrow(
+                        "SELECT id, locked, status FROM alliances WHERE id = $1",
+                        m["id"])
+                else:
+                    await self._create(p)
+                    row = await self.db.fetchrow(find, name)
                 if row is None:
                     continue
             elif row["locked"] and row["status"] == "dissolved":
