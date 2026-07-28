@@ -138,6 +138,86 @@ class Extractor:
         self.llm = llm
         self.roster = roster
 
+    async def parse_alliance_report(self, update) -> list:
+        """Parse a PUBLISHED alliance report into AllianceProposals.
+
+        A site's alliance write-up is a different genre from feed chatter: it
+        lists groups and rosters outright. The general extractor is tuned for
+        conversations (it wants an agreement in the text and a name the
+        houseguests used themselves), so it reads such an article far too
+        conservatively — it returned one group out of eleven. This asks for
+        exactly one thing, with room to answer fully.
+        """
+        text = f"{update.title}\n\n{update.body}"
+        system = (
+            "You extract structured data from Big Brother articles. You are "
+            "reading a published ALLIANCE REPORT — a journalist's list of the "
+            "alliances currently in the house. Report what the ARTICLE says, "
+            "neutrally and completely."
+        )
+        roster = ""
+        if self.roster and not self.roster.is_empty:
+            roster = ("Valid houseguest names: "
+                      + ", ".join(sorted(self.roster.names)) + ".\n"
+                      "Map nicknames to these (Rick=Devens, Lala=LaTrice).\n")
+        user = (
+            f"{roster}"
+            "List EVERY alliance, group, duo or deal the article states — work "
+            "through it start to finish and do not stop early.\n"
+            "- 'name': the group's name exactly as written, minus a leading "
+            "'The'. Omit 'name' for unnamed pairs/deals it describes.\n"
+            "- 'members': every houseguest listed for that group.\n"
+            "- 'confidence': 0.9 normally; 0.6 if the article hedges (\"not a "
+            "serious thing\", \"by no means solid\").\n"
+            "- 'evidence': the phrase from the article naming that group.\n"
+            "Include groups it describes as cracking or on the outs — that is "
+            "status, not absence. Skip anything that is not a group of "
+            "houseguests working together.\n\n"
+            f"ARTICLE:\n\n{text}"
+        )
+        schema = {
+            "type": "object",
+            "properties": {
+                "alliances": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "name": {"type": "string"},
+                            "members": {"type": "array", "items": {"type": "string"}},
+                            "confidence": {"type": "number"},
+                            "evidence": {"type": "string"},
+                        },
+                        "required": ["members"],
+                    },
+                }
+            },
+            "required": ["alliances"],
+        }
+        data = await self.llm.structured(
+            system, user, tool_name="record_alliance_report",
+            tool_description="Record every alliance listed in the article.",
+            schema=schema, max_tokens=4000)
+        if not data or not isinstance(data.get("alliances"), list):
+            return []
+        out = []
+        for a in data["alliances"]:
+            if not isinstance(a, dict):
+                continue
+            members = self.roster.resolve_all(list(a.get("members") or [])) \
+                if self.roster else list(a.get("members") or [])
+            members = list(dict.fromkeys(m for m in members if m))
+            if len(members) < 2:
+                continue
+            out.append(AllianceProposal(
+                members=members, status="active",
+                confidence=_clamp(a.get("confidence", 0.9)),
+                evidence=str(a.get("evidence", ""))[:500],
+                name=(str(a.get("name")).strip() or None) if a.get("name") else None,
+                source_hash=update.content_hash,
+            ))
+        return out
+
     async def extract(self, updates: list, context_updates: list | None = None,
                       house_context: str = "", episode_airing: bool = False) -> Extraction:
         """Extract from `updates` (NEW). `context_updates` are recent,
