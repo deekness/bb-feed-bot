@@ -85,6 +85,16 @@ rss_proxy_templates:
 extra_rss_feeds:
   - name: "onlinebb"
     url: "https://www.onlinebigbrother.com/feed/"
+  # Big Brother Network: long-form site reports — full-day feed highlights with
+  # BBT timestamps, and a weekly "Alliances and Deals Report" naming every group
+  # and its roster. Published HOURS after the events, so it's marked a digest:
+  # excluded from Breaking, and never summarized as happening now. The teaser in
+  # <description> is truncated, so read <content:encoded> instead.
+  - name: "bbnetwork"
+    url: "https://feeds.feedburner.com/bigbrothernetwork"
+    use_content: true
+    digest: true
+    poll_interval_s: 900
 
 # ----------------------------------------------------------------------------
 # ROSTER — the heart of the system.
