@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /namealliance, /setmembers, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
+        /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -577,6 +577,48 @@ class BBCommands(commands.Cog):
         await interaction.response.send_message(
             f"🧹 Cleared {n} relationship row(s) ({scope}). They'll rebuild from "
             "fresh feed evidence under the new extraction rules.", ephemeral=True)
+
+    @app_commands.command(
+        name="applyalliancereport",
+        description="(Admin) Re-apply the newest stored alliance report as truth.")
+    async def applyalliancereport(self, interaction: discord.Interaction):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        await interaction.response.defer(ephemeral=True)
+        srcs = list(self.bot.alliance_authority_sources)
+        if not srcs:
+            await interaction.followup.send(
+                "No source is configured as an alliance authority.", ephemeral=True)
+            return
+        rows = await self.bot.db.fetch(
+            """
+            SELECT content_hash, source, author, title, body, link, published_at
+            FROM updates
+            WHERE source = ANY($1) AND title ILIKE '%alliance%'
+              AND (title ILIKE '%report%' OR title ILIKE '%deals%')
+            ORDER BY published_at DESC LIMIT 1
+            """,
+            srcs)
+        if not rows:
+            await interaction.followup.send(
+                "No alliance report found in the archive yet — the source may not "
+                "have been polled, or none has been published since it was added.",
+                ephemeral=True)
+            return
+        upd = self.bot.db._to_update(rows[0])
+        extraction = await self.bot.extractor.extract(
+            [upd], house_context=await self.bot.house_context())
+        named = [a for a in extraction.alliances if a.name]
+        if not named:
+            await interaction.followup.send(
+                f"Found '{upd.title[:80]}' but no named alliances could be read "
+                "from it.", ephemeral=True)
+            return
+        n = await self.bot.alliances.apply_report(named, source_hash=upd.content_hash)
+        await interaction.followup.send(
+            f"📋 Applied **{n}** named alliance(s) from “{upd.title[:80]}”. "
+            "Their rosters now match the report.", ephemeral=True)
 
     @app_commands.command(name="setmembers",
                           description="(Admin) Set an alliance's exact member list.")
