@@ -607,9 +607,8 @@ class BBCommands(commands.Cog):
                 ephemeral=True)
             return
         upd = self.bot.db._to_update(rows[0])
-        extraction = await self.bot.extractor.extract(
-            [upd], house_context=await self.bot.house_context())
-        named = [a for a in extraction.alliances if a.name]
+        proposals = await self.bot.extractor.parse_alliance_report(upd)
+        named = [a for a in proposals if a.name]
         if not named:
             body = (upd.body or "")
             hint = ("the stored article looks TRUNCATED — the source likely "
@@ -623,9 +622,10 @@ class BBCommands(commands.Cog):
                 f"First 200 chars: `{body[:200]}`", ephemeral=True)
             return
         n = await self.bot.alliances.apply_report(named, source_hash=upd.content_hash)
+        groups = ", ".join(a.name for a in named[:12])
         await interaction.followup.send(
-            f"📋 Applied **{n}** named alliance(s) from “{upd.title[:80]}”. "
-            "Their rosters now match the report.", ephemeral=True)
+            f"📋 Read **{len(proposals)}** group(s) from “{upd.title[:70]}” and "
+            f"applied **{n}** named: {groups}", ephemeral=True)
 
     @app_commands.command(name="setmembers",
                           description="(Admin) Set an alliance's exact member list.")

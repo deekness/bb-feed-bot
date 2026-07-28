@@ -869,13 +869,23 @@ class BBBot(commands.Bot):
                 report_hashes = {u.content_hash for u in new_updates
                                  if self._is_alliance_report(u)}
                 if report_hashes:
-                    authoritative = [a for a in extraction.alliances
-                                     if a.source_hash in report_hashes and a.name]
-                    rest = [a for a in extraction.alliances if a not in authoritative]
-                    if authoritative:
-                        n = await self.alliances.apply_report(
-                            authoritative, source_hash=next(iter(report_hashes)))
-                        log.info("alliance report applied: %d named groups set", n)
+                    # Parse the report article itself with the dedicated
+                    # parser — the conversational extractor reads a roster
+                    # list far too conservatively.
+                    rest = [a for a in extraction.alliances
+                            if a.source_hash not in report_hashes]
+                    for u in new_updates:
+                        if u.content_hash not in report_hashes:
+                            continue
+                        parsed = await self.extractor.parse_alliance_report(u)
+                        named = [a for a in parsed if a.name]
+                        if named:
+                            n = await self.alliances.apply_report(
+                                named, source_hash=u.content_hash)
+                            log.info("alliance report: read %d groups, applied %d",
+                                     len(parsed), n)
+                        await self.alliances.ingest(
+                            [a for a in parsed if not a.name])
                     await self.alliances.ingest(rest)
                 else:
                     await self.alliances.ingest(extraction.alliances)
