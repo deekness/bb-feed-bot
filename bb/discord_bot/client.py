@@ -108,18 +108,26 @@ class BBBot(commands.Bot):
             RSSSource(f["url"], name=f.get("name", "rss2"),
                       proxy_templates=season.rss_proxy_templates,
                       poll_interval_s=int(f.get("poll_interval_s",
-                                                season.rss_poll_interval_s)))
+                                                season.rss_poll_interval_s)),
+                      use_content=bool(f.get("use_content")),
+                      digest=bool(f.get("digest")))
             for f in season.extra_rss_feeds if f.get("url")
         ]
+        # Sources that publish recap articles after the fact — excluded from
+        # Breaking, and flagged to the summarizer so their content is never
+        # reported as happening now.
+        self.digest_sources = {e.name for e in extra if e.digest}
         for e in extra:
-            log.info("extra RSS source: %s", e.name)
+            log.info("extra RSS source: %s%s", e.name,
+                     " (digest)" if e.digest else "")
         sources = [self.rss_source, *extra,
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
         self.pipeline = IngestPipeline(self.db, sources)
         self.extractor = Extractor(self.llm, self.roster)
         self.summarizer = Summarizer(self.llm, self.house_tz, self.roster,
-                                     episode_window=season.in_episode_window)
+                                     episode_window=season.in_episode_window,
+                                     digest_sources=self.digest_sources)
         self.alliances = AllianceTracker(self.db)
         self.relationships = RelationshipTracker(self.db)
         self.game_state = GameStateTracker(self.db, season.start_date,
@@ -777,6 +785,10 @@ class BBBot(commands.Bot):
             if channel and self._in_season():
                 for u in new_updates:
                     if recap_airing and u.source == "bluesky":
+                        continue
+                    # Digest sources report hours-old events — "breaking" news
+                    # from them is old news to a feed-watching server.
+                    if u.source in self.digest_sources:
                         continue
                     # Stage 1 (cheap): keyword NOMINATES a candidate. It does not
                     # decide — houseguests say "veto"/"backdoor" all day long.
