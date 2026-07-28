@@ -37,7 +37,22 @@ from ..db import Database
 log = logging.getLogger("bb.trackers.alliances")
 
 
+def norm_name(name) -> str:
+    """Canonical alliance name for comparison: case-folded, and a leading
+    'the ' dropped. Sites write 'The Red Corner' where the house says 'Red
+    Corner' — without this they become two separate alliances."""
+    n = str(name or "").strip().lower()
+    return n[4:].strip() if n.startswith("the ") else n
+
+
+# Same normalization, SQL-side, for matching against stored names.
+_NORM_SQL = "regexp_replace(lower(btrim({col})), '^the\\s+', '')"
+
+
 class AllianceTracker:
+    # A published alliance report is deliberate, so groups it names are at
+    # least this confident even if the wording is casual.
+    REPORT_FLOOR = 0.85
     MERGE_OVERLAP = 2        # shared members required to treat as the same alliance
     JACCARD_MIN = 0.55       # member-set similarity required to merge non-exact matches
     CORROBORATION = 0.25     # confidence gained per fresh (non-duplicate) mention
@@ -174,7 +189,7 @@ class AllianceTracker:
             if len(mset) == 2 or len(rset) == 2:
                 continue  # duos are protected both ways: they never merge into
                           # supersets and never absorb them
-            if name and r["name"] and name.strip().lower() != str(r["name"]).strip().lower():
+            if name and r["name"] and norm_name(name) != norm_name(r["name"]):
                 continue  # differently-named alliances are distinct entities
             overlap = len(mset & rset)
             j = overlap / len(mset | rset)
@@ -189,8 +204,8 @@ class AllianceTracker:
         if not name:
             return False
         row = await self.db.fetchval(
-            "SELECT id FROM alliances WHERE lower(name) = lower($1) "
-            "AND ($2::int IS NULL OR id <> $2) LIMIT 1",
+            f"SELECT id FROM alliances WHERE {_NORM_SQL.format(col='name')} = "
+            f"{_NORM_SQL.format(col='$1')} AND ($2::int IS NULL OR id <> $2) LIMIT 1",
             name, alliance_id)
         return row is not None
 
@@ -340,6 +355,62 @@ class AllianceTracker:
             alliance_id,
         )
         return _rowcount(result) > 0
+
+    async def apply_report(self, proposals: list, source_hash: str = "") -> int:
+        """Apply an AUTHORITATIVE alliance report (a site's published roster).
+
+        Ordinary feed chatter can only ever ADD members — one overheard
+        conversation naming three of eight people must not delete the other
+        five. A published alliance report is different: it states the full
+        roster deliberately, so for each NAMED group it becomes the truth —
+        members it omits are dropped. This is what stops accreted, merged
+        rosters (Toolshed swallowing Red Corner) from persisting forever.
+
+        Only NAMED groups are applied; unnamed pairs in a report go through
+        normal evidence handling. Human-rejected alliances stay dead, and a
+        locked (confirmed) alliance keeps its confidence but still has its
+        roster corrected.
+        """
+        applied = 0
+        for p in proposals:
+            name = (p.name or "").strip()
+            members = list(dict.fromkeys(p.members or []))
+            if not name or len(members) < 2:
+                continue
+            find = (f"SELECT id, locked, status FROM alliances WHERE "
+                    f"{_NORM_SQL.format(col='name')} = {_NORM_SQL.format(col='$1')} "
+                    f"ORDER BY id LIMIT 1")
+            row = await self.db.fetchrow(find, name)
+            if row is None:
+                await self._create(p)
+                row = await self.db.fetchrow(find, name)
+                if row is None:
+                    continue
+            elif row["locked"] and row["status"] == "dissolved":
+                continue                      # human rejected it: stays dead
+            await self.set_members(row["id"], members)
+            await self.db.execute(
+                "INSERT INTO alliance_evidence (alliance_id, quote, confidence, source_hash) "
+                "VALUES ($1, $2, $3, $4)",
+                row["id"], p.evidence, p.confidence, source_hash)
+            if row["locked"]:
+                await self.db.execute(
+                    "UPDATE alliances SET last_seen = now(), decayed_at = now() "
+                    "WHERE id = $1", row["id"])
+            else:
+                await self.db.execute(
+                    """
+                    UPDATE alliances
+                    SET confidence = GREATEST(confidence, $2),
+                        status = CASE WHEN status = 'dissolved' THEN 'active'
+                                      ELSE status END,
+                        last_seen = now(), decayed_at = now()
+                    WHERE id = $1
+                    """,
+                    row["id"], max(float(p.confidence or 0), self.REPORT_FLOOR))
+            applied += 1
+            log.info("alliance report: %s roster set to %s", name, members)
+        return applied
 
     async def set_members(self, alliance_id: int, members: list[str]) -> bool:
         """Replace an alliance's roster by hand — the repair tool for accreted
