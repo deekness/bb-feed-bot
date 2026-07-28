@@ -611,9 +611,16 @@ class BBCommands(commands.Cog):
             [upd], house_context=await self.bot.house_context())
         named = [a for a in extraction.alliances if a.name]
         if not named:
+            body = (upd.body or "")
+            hint = ("the stored article looks TRUNCATED — the source likely "
+                    "wasn't reading full article content when it was ingested"
+                    if len(body) < 600 else
+                    "the article text is present, so extraction didn't read the "
+                    "roster list")
             await interaction.followup.send(
-                f"Found '{upd.title[:80]}' but no named alliances could be read "
-                "from it.", ephemeral=True)
+                f"Found “{upd.title[:70]}” ({len(body)} chars stored) but no "
+                f"named alliances could be read — {hint}.\n"
+                f"First 200 chars: `{body[:200]}`", ephemeral=True)
             return
         n = await self.bot.alliances.apply_report(named, source_hash=upd.content_hash)
         await interaction.followup.send(
