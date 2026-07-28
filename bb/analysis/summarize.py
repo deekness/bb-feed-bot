@@ -268,13 +268,17 @@ def is_urgent(update: Update) -> bool:
 
 
 class Summarizer:
-    def __init__(self, llm: LLM, tz, roster=None, episode_window=None):
+    def __init__(self, llm: LLM, tz, roster=None, episode_window=None,
+                 digest_sources=None):
         self.llm = llm
         self.tz = tz
         # Callable(datetime) -> bool: is this timestamp inside a TV episode
         # airing? Updaters live-tweet the broadcast — an EDITED REPLAY of
         # events from earlier days — which must not read as new feed events.
         self.episode_window = episode_window
+        # Sources publishing recap ARTICLES hours after the fact (site feed
+        # reports). Rich and reliable, but a look BACK — never the current hour.
+        self.digest_sources = set(digest_sources or ())
         # The roster lets prompts state the canonical cast + aliases. Updaters
         # write "Rick" and "Devens" (and "Lala"/"LaTrice") interchangeably —
         # without this the model reports one person as two.
@@ -649,6 +653,8 @@ class Summarizer:
                    if (u.source == "bluesky" and self.episode_window
                        and self.episode_window(u.published_at))
                    else "")
+            if u.source in self.digest_sources:
+                tag = "[RECAP ARTICLE — covers EARLIER hours] " + tag
             return f"- {tag}{u.text}"
         body = "\n".join(line(u) for u in sorted(updates, key=lambda u: u.published_at))
         system = _NEUTRALITY + " " + self._naming_rule() + "Be concise."
@@ -665,6 +671,10 @@ class Summarizer:
             "- Group related updates together; never repeat the same point under "
             "two headers. One group is fine if that's all there is.\n"
             "- No intro or closing paragraph — start straight at the first header.\n"
+            "- Lines tagged [RECAP ARTICLE] are a site's write-up of EARLIER "
+            "hours (usually the previous day): use them for context, names and "
+            "detail, but never report their contents as just-happened, and "
+            "don't build a topic group out of one alone.\n"
             "- Lines tagged [DURING EPISODE AIRING] were posted while a TV "
             "episode aired. Feeds stay live during Sunday/Wednesday episodes, so "
             "such a line is EITHER narration of the broadcast (comp footage, "
