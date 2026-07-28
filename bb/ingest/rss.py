@@ -60,7 +60,10 @@ class RSSSource:
                  fallback_urls: list[str] | None = None,
                  proxy_templates: list[str] | None = None,
                  name: str | None = None,
-                 poll_interval_s: int = 0):
+                 poll_interval_s: int = 0,
+                 use_content: bool = False,
+                 digest: bool = False,
+                 max_body_chars: int = 9000):
         # Distinct name per feed so several RSS sources can run side by side and
         # stay attributable in the archive.
         if name:
@@ -72,6 +75,14 @@ class RSSSource:
         self.using_proxy = False        # surfaced in /status
         self._active_url = url
         self.poll_interval_s = poll_interval_s
+        # Some sites publish full ARTICLES: <description> is a truncated teaser
+        # ("...[...]") and the real text lives in <content:encoded>.
+        self.use_content = use_content
+        self.max_body_chars = max_body_chars
+        # A digest source publishes recap articles HOURS after the events they
+        # describe. Great for extraction and archive depth, but it must never
+        # drive Breaking alerts or read as "happening right now".
+        self.digest = digest
         # Conditional-GET validators. RSS is built for this and the bot should
         # always have used it: if the feed hasn't changed the server replies
         # 304 Not Modified with an EMPTY body — no re-download of ~70 items,
@@ -162,6 +173,13 @@ class RSSSource:
             try:
                 title = _clean_html(entry.get("title", ""))
                 body = _clean_html(entry.get("description", ""))
+                if self.use_content:
+                    blocks = entry.get("content") or []
+                    full = _clean_html(blocks[0].get("value", "")) if blocks else ""
+                    if len(full) > len(body):
+                        body = full
+                if len(body) > self.max_body_chars:
+                    body = body[:self.max_body_chars].rsplit(" ", 1)[0] + " …"
                 link = entry.get("link", "")
                 published = self._published(entry)
                 if not title and not body:
