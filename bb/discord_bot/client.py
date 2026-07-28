@@ -117,6 +117,10 @@ class BBBot(commands.Bot):
         # Breaking, and flagged to the summarizer so their content is never
         # reported as happening now.
         self.digest_sources = {e.name for e in extra if e.digest}
+        # Sources whose published alliance reports are treated as the truth.
+        self.alliance_authority_sources = {
+            f.get("name") for f in season.extra_rss_feeds
+            if f.get("alliance_authority")}
         for e in extra:
             log.info("extra RSS source: %s%s", e.name,
                      " (digest)" if e.digest else "")
@@ -704,6 +708,14 @@ class BBBot(commands.Bot):
         age = (dt.datetime.now(dt.timezone.utc) - recorded_at).total_seconds()
         return age > self.BREAKING_STALE_AFTER_S
 
+    def _is_alliance_report(self, u) -> bool:
+        """The site's published 'Alliances and Deals Report' — a deliberate
+        full-roster write-up, not passing chatter that mentions a group."""
+        if u.source not in self.alliance_authority_sources:
+            return False
+        title = (getattr(u, "title", "") or "").lower()
+        return "alliance" in title and ("report" in title or "deals" in title)
+
     async def house_context(self) -> str:
         """Short current-state block injected into extraction and summary
         prompts: week, game state, active alliances. Empty pre-roster."""
@@ -851,7 +863,22 @@ class BBBot(commands.Bot):
                     extraction.vote_plans = [
                         v for v in extraction.vote_plans
                         if hash_src.get(v.source_hash) != "bluesky"]
-                await self.alliances.ingest(extraction.alliances)
+                # A published ALLIANCE REPORT is authoritative: for the groups
+                # it names, its roster replaces ours (ordinary chatter can only
+                # add members, which is why merged rosters used to persist).
+                report_hashes = {u.content_hash for u in new_updates
+                                 if self._is_alliance_report(u)}
+                if report_hashes:
+                    authoritative = [a for a in extraction.alliances
+                                     if a.source_hash in report_hashes and a.name]
+                    rest = [a for a in extraction.alliances if a not in authoritative]
+                    if authoritative:
+                        n = await self.alliances.apply_report(
+                            authoritative, source_hash=next(iter(report_hashes)))
+                        log.info("alliance report applied: %d named groups set", n)
+                    await self.alliances.ingest(rest)
+                else:
+                    await self.alliances.ingest(extraction.alliances)
                 await self.relationships.ingest(extraction.relationships)
                 # Hard facts (HOH/noms/eviction, vote plans) require a LIVE feed.
                 # While feeds are off (pre-premiere) or down (comp/ceremony
