@@ -20,6 +20,7 @@ per-houseguest handling here or downstream.
 """
 from __future__ import annotations
 
+import difflib
 import logging
 import re
 
@@ -150,6 +151,28 @@ class Extractor:
     # silently merges that group into the previous one.
     _REPORT_LABEL = re.compile(r"([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,4})\s*:\s")
 
+    def _resolve_loose(self, word: str) -> str | None:
+        """Resolve a name, tolerating the small misspellings sites make
+        ("Barett" for Barrett). Exact roster/nickname match first; only then a
+        close match, and only for words long enough to be a name. Confined to
+        alliance-report parsing — feed extraction stays strict."""
+        if not word or not self.roster:
+            return None
+        hit = self.roster.resolve(word)
+        if hit:
+            return hit
+        if len(word) < 4 or not word[:1].isupper():
+            return None
+        close = difflib.get_close_matches(word.lower(),
+                                          [n.lower() for n in self.roster.names],
+                                          n=1, cutoff=0.85)
+        if not close:
+            return None
+        for n in self.roster.names:
+            if n.lower() == close[0]:
+                return n
+        return None
+
     def parse_alliance_report(self, update) -> list:
         """Parse a PUBLISHED alliance report into AllianceProposals.
 
@@ -198,7 +221,7 @@ class Extractor:
                 w = w.strip(" .,()'\"")
                 if not w:
                     continue
-                hg = self.roster.resolve(w) if self.roster else w
+                hg = self._resolve_loose(w) if self.roster else w
                 if hg:
                     members.append(hg)
                 elif len(w.split()) <= 3:
@@ -237,7 +260,7 @@ class Extractor:
                     if len(window.split()) < 2:      # e.g. cut right at a comma
                         window = head[max(0, idx - 60):]
                     for w in re.split(r"[^A-Za-z']+", window):
-                        hg = self.roster.resolve(w) if (self.roster and w) else None
+                        hg = self._resolve_loose(w) if (self.roster and w) else None
                         if hg and hg in members:
                             played.add(hg)
                     idx += len(phrase)
