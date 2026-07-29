@@ -241,6 +241,19 @@ class BBBot(commands.Bot):
         log.warning("briefing channel %s not found — falling back", cid)
         return await self.recap_channel()
 
+    def _live_only(self, updates: list) -> list:
+        """Drop digest-source items from anything that summarises a TIME WINDOW.
+
+        A site's daily write-up recaps EARLIER days, so when such a source is
+        first added its backlog lands in one window — that is how Monday's
+        tea-kettle bit ended up in the Day 22 recap. These items are still
+        stored, still searchable by /ask, and still feed extraction (alliance
+        reports especially); they just don't get to date-stamp themselves.
+        """
+        if not getattr(self, "digest_sources", None):
+            return updates
+        return [u for u in updates if u.source not in self.digest_sources]
+
     async def wtf_updates(self, target_hours: int = 8, min_updates: int = 40,
                           max_hours: int = 24):
         """Updates for /wtf, with a window that adapts to house activity.
@@ -253,7 +266,7 @@ class BBBot(commands.Bot):
         recent_count) — recent_count = updates in the ORIGINAL target window,
         which tells the caller how live things actually are.
         """
-        recent = await self.db.recent_updates(target_hours)
+        recent = self._live_only(await self.db.recent_updates(target_hours))
         recent_count = len(recent)
         if recent_count >= min_updates:
             return recent, target_hours, recent_count
@@ -262,7 +275,7 @@ class BBBot(commands.Bot):
         updates = recent
         while hours < max_hours and len(updates) < min_updates:
             hours = min(max_hours, hours * 2)
-            updates = await self.db.recent_updates(hours)
+            updates = self._live_only(await self.db.recent_updates(hours))
         return updates, hours, recent_count
 
     async def build_briefing(self):
@@ -620,7 +633,7 @@ class BBBot(commands.Bot):
 
     async def _generate_episode_recap(self, start_utc, end_utc, label,
                                       *, force: bool) -> discord.Embed | None:
-        updates = await self.db.updates_between(start_utc, end_utc)
+        updates = self._live_only(await self.db.updates_between(start_utc, end_utc))
         if not updates:
             return None
         context = await self.house_context()
@@ -964,7 +977,7 @@ class BBBot(commands.Bot):
                 start_utc, end_utc):
             return
 
-        updates = await self.db.updates_between(start_utc, end_utc)
+        updates = self._live_only(await self.db.updates_between(start_utc, end_utc))
         if not updates:
             if not post:
                 return  # missed window with nothing in it: nothing to store
