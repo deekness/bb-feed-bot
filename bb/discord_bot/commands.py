@@ -25,7 +25,7 @@ from ..analysis.summarize import one_sided_note as _one_sided_note
 log = logging.getLogger("bb.commands")
 
 
-async def fetch_article_text(url: str, limit: int = 20000) -> str:
+async def fetch_article_text(url: str, limit: int = 120000) -> str:
     """Plain text of an article page — the last resort when a report has
     scrolled out of its feed."""
     try:
