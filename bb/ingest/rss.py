@@ -19,10 +19,21 @@ _TAG = re.compile(r"<[^>]+>")
 _WS = re.compile(r"\s+")
 
 
+_SCRIPTISH = re.compile(
+    r"<(script|style|noscript|svg|head)\b[^>]*>.*?</\1\s*>",
+    re.IGNORECASE | re.DOTALL)
+
+
 def _clean_html(text: str) -> str:
-    """Strip tags and unescape entities so downstream text is plain."""
+    """Strip tags and unescape entities so downstream text is plain.
+
+    Script/style bodies are removed FIRST: stripping only the tags leaves the
+    JavaScript itself behind, which on a full web page buries the article
+    under thousands of characters of code.
+    """
     if not text:
         return ""
+    text = _SCRIPTISH.sub(" ", text)
     text = _TAG.sub(" ", text)
     text = html.unescape(text)
     return _WS.sub(" ", text).strip()
