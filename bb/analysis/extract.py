@@ -144,9 +144,11 @@ class Extractor:
     # Anchoring matters: rosters run together once HTML is stripped
     # ("...Chuk and Haley The Crossovers: Dee..."), so a looser pattern
     # swallows the previous roster's last member into the next label.
-    _REPORT_LABEL = re.compile(
-        r"(?:(?<=^)|(?<=[.;)\n])\s*|\bThe\s+)"
-        r"([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,3})\s*:\s")
+    # Match any "Capitalised Words:" label, then trim it. Anchoring on
+    # punctuation or "The" misses labels the writer runs on without either
+    # ("...Drew, Melody and Jason Harmony Hotties: Melody and Lyric"), which
+    # silently merges that group into the previous one.
+    _REPORT_LABEL = re.compile(r"([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,4})\s*:\s")
 
     def parse_alliance_report(self, update) -> list:
         """Parse a PUBLISHED alliance report into AllianceProposals.
@@ -162,8 +164,26 @@ class Extractor:
         ends and the writer's commentary begins.
         """
         text = f"{update.title}. {update.body or ''}"
-        labels = [(m.start(1), m.end(0), m.group(1).strip())
-                  for m in self._REPORT_LABEL.finditer(text)]
+        labels = []
+        for m in self._REPORT_LABEL.finditer(text):
+            words = m.group(1).split()
+            start = m.start(1)
+            # The match can begin with the tail of the PREVIOUS roster
+            # ("Jason Harmony Hotties", "Haley The Crossovers"). Drop leading
+            # houseguest names and "The", moving the label's start with them so
+            # those names stay in the group they belong to.
+            drop = 0
+            while drop < len(words) - 1:
+                w = words[drop]
+                if w.lower() == "the" or (self.roster and self.roster.resolve(w)):
+                    drop += 1
+                else:
+                    break
+            if drop:
+                start += len(" ".join(words[:drop])) + 1
+                words = words[drop:]
+            if words:
+                labels.append((start, m.end(0), " ".join(words)))
         out, seen = [], set()
         for i, (_, tail_start, name) in enumerate(labels):
             stop = labels[i + 1][0] if i + 1 < len(labels) else len(text)
