@@ -21,6 +21,7 @@ per-houseguest handling here or downstream.
 from __future__ import annotations
 
 import logging
+import re
 
 from ..llm import LLM
 from ..models import AllianceProposal, Extraction, GameEvent, RelationshipChange, VotePlan
@@ -138,83 +139,66 @@ class Extractor:
         self.llm = llm
         self.roster = roster
 
-    async def parse_alliance_report(self, update) -> list:
+    # "The Toolshed:" / "Harmony Hotties:" — a group label followed by a roster.
+    # A group label starts either at a sentence boundary or right after "The".
+    # Anchoring matters: rosters run together once HTML is stripped
+    # ("...Chuk and Haley The Crossovers: Dee..."), so a looser pattern
+    # swallows the previous roster's last member into the next label.
+    _REPORT_LABEL = re.compile(
+        r"(?:(?<=^)|(?<=[.;)\n])\s*|\bThe\s+)"
+        r"([A-Z][\w'’-]*(?:\s+[A-Z][\w'’-]*){0,3})\s*:\s")
+
+    def parse_alliance_report(self, update) -> list:
         """Parse a PUBLISHED alliance report into AllianceProposals.
 
-        A site's alliance write-up is a different genre from feed chatter: it
-        lists groups and rosters outright. The general extractor is tuned for
-        conversations (it wants an agreement in the text and a name the
-        houseguests used themselves), so it reads such an article far too
-        conservatively — it returned one group out of eleven. This asks for
-        exactly one thing, with room to answer fully.
+        DETERMINISTIC — no model call. These reports list groups as
+        'The Toolshed: Devens, Dee, Angela, Kamu, Chuk, Haley, Drew and
+        Barrett.', so the parse is exact, repeatable, and testable against a
+        real article instead of hoping a prompt behaves.
+
+        HTML list items collapse into one run-on line once tags are stripped,
+        so each roster is taken as the text from its label up to the NEXT
+        label, then cut at the first '.' or '(' — which is where the roster
+        ends and the writer's commentary begins.
         """
-        text = f"{update.title}\n\n{update.body}"
-        system = (
-            "You extract structured data from Big Brother articles. You are "
-            "reading a published ALLIANCE REPORT — a journalist's list of the "
-            "alliances currently in the house. Report what the ARTICLE says, "
-            "neutrally and completely."
-        )
-        roster = ""
-        if self.roster and not self.roster.is_empty:
-            roster = ("Valid houseguest names: "
-                      + ", ".join(sorted(self.roster.names)) + ".\n"
-                      "Map nicknames to these (Rick=Devens, Lala=LaTrice).\n")
-        user = (
-            f"{roster}"
-            "List EVERY alliance, group, duo or deal the article states — work "
-            "through it start to finish and do not stop early.\n"
-            "- 'name': the group's name exactly as written, minus a leading "
-            "'The'. Omit 'name' for unnamed pairs/deals it describes.\n"
-            "- 'members': every houseguest listed for that group.\n"
-            "- 'confidence': 0.9 normally; 0.6 if the article hedges (\"not a "
-            "serious thing\", \"by no means solid\").\n"
-            "- 'evidence': the phrase from the article naming that group.\n"
-            "Include groups it describes as cracking or on the outs — that is "
-            "status, not absence. Skip anything that is not a group of "
-            "houseguests working together.\n\n"
-            f"ARTICLE:\n\n{text}"
-        )
-        schema = {
-            "type": "object",
-            "properties": {
-                "alliances": {
-                    "type": "array",
-                    "items": {
-                        "type": "object",
-                        "properties": {
-                            "name": {"type": "string"},
-                            "members": {"type": "array", "items": {"type": "string"}},
-                            "confidence": {"type": "number"},
-                            "evidence": {"type": "string"},
-                        },
-                        "required": ["members"],
-                    },
-                }
-            },
-            "required": ["alliances"],
-        }
-        data = await self.llm.structured(
-            system, user, tool_name="record_alliance_report",
-            tool_description="Record every alliance listed in the article.",
-            schema=schema, max_tokens=4000)
-        if not data or not isinstance(data.get("alliances"), list):
-            return []
-        out = []
-        for a in data["alliances"]:
-            if not isinstance(a, dict):
+        text = f"{update.title}. {update.body or ''}"
+        labels = [(m.start(1), m.end(0), m.group(1).strip())
+                  for m in self._REPORT_LABEL.finditer(text)]
+        out, seen = [], set()
+        for i, (_, tail_start, name) in enumerate(labels):
+            stop = labels[i + 1][0] if i + 1 < len(labels) else len(text)
+            segment = text[tail_start:stop]
+            roster_part = re.split(r"[.(]", segment, maxsplit=1)[0]
+            # the next bullet's leading "The" bleeds onto the last member
+            # ("...Drew and Kamu The") — strip it or that member is lost
+            roster_part = re.sub(r"\s+The\s*$", " ", roster_part)
+            name = re.sub(r"^The\s+", "", name).strip()
+            members, unknown = [], 0
+            for w in re.split(r",|\band\b|&", roster_part):
+                w = w.strip(" .,()'\"")
+                if not w:
+                    continue
+                hg = self.roster.resolve(w) if self.roster else w
+                if hg:
+                    members.append(hg)
+                elif len(w.split()) <= 3:
+                    unknown += 1
+            members = list(dict.fromkeys(members))
+            # a roster is mostly houseguests; prose is mostly not
+            if len(members) < 2 or unknown > len(members):
                 continue
-            members = self.roster.resolve_all(list(a.get("members") or [])) \
-                if self.roster else list(a.get("members") or [])
-            members = list(dict.fromkeys(m for m in members if m))
-            if len(members) < 2:
+            key = tuple(sorted(members))
+            if key in seen:
                 continue
+            seen.add(key)
+            hedged = any(p in segment.lower() for p in
+                         ("not a serious", "by no means", "not sure how serious"))
             out.append(AllianceProposal(
                 members=members, status="active",
-                confidence=_clamp(a.get("confidence", 0.9)),
-                evidence=str(a.get("evidence", ""))[:500],
-                name=(str(a.get("name")).strip() or None) if a.get("name") else None,
-                source_hash=update.content_hash,
+                confidence=0.6 if hedged else 0.9,
+                evidence=f"{name}: {roster_part.strip()}"[:300],
+                name=name or None,
+                source_hash=getattr(update, "content_hash", ""),
             ))
         return out
 
