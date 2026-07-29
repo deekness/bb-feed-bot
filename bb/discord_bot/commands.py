@@ -13,6 +13,7 @@ separate files and load them in setup_hook.
 from __future__ import annotations
 
 import logging
+from dataclasses import replace
 
 import discord
 from discord import app_commands
@@ -22,6 +23,24 @@ from ..analysis.summarize import sentence_clamp as _sent_clamp
 from ..analysis.summarize import one_sided_note as _one_sided_note
 
 log = logging.getLogger("bb.commands")
+
+
+async def fetch_article_text(url: str, limit: int = 20000) -> str:
+    """Plain text of an article page — the last resort when a report has
+    scrolled out of its feed."""
+    try:
+        import aiohttp
+        from ..ingest.rss import _UA, _clean_html
+        async with aiohttp.ClientSession(headers={"User-Agent": _UA}) as sess:
+            async with sess.get(url, timeout=20) as resp:
+                if resp.status != 200:
+                    log.warning("article fetch %s -> HTTP %s", url, resp.status)
+                    return ""
+                html = (await resp.read()).decode("utf-8", "ignore")
+    except Exception as e:
+        log.warning("article fetch failed: %s", e)
+        return ""
+    return _clean_html(html)[:limit]
 
 
 def _chunk_lines(lines: list[str], limit: int = 1024) -> list[str]:
@@ -597,7 +616,8 @@ class BBCommands(commands.Cog):
             FROM updates
             WHERE source = ANY($1) AND title ILIKE '%alliance%'
               AND (title ILIKE '%report%' OR title ILIKE '%deals%')
-            ORDER BY published_at DESC LIMIT 1
+            ORDER BY published_at DESC, length(coalesce(body, '')) DESC
+            LIMIT 1
             """,
             srcs)
         if not rows:
@@ -626,6 +646,13 @@ class BBCommands(commands.Cog):
                 if match and len(match.body or "") > len(upd.body or ""):
                     await self.bot.db.add_update(match)   # keep the full text
                     upd = match
+                elif upd.link:
+                    # BBN posts several times a day, so a report drops out of
+                    # the feed window within about a day. Fall back to the
+                    # article page itself.
+                    body = await fetch_article_text(upd.link)
+                    if len(body) > len(upd.body or ""):
+                        upd = replace(upd, body=body)
 
         proposals = self.bot.extractor.parse_alliance_report(upd)
         named = [a for a in proposals if a.name]
