@@ -184,7 +184,7 @@ class Extractor:
                 words = words[drop:]
             if words:
                 labels.append((start, m.end(0), " ".join(words)))
-        out, seen = [], set()
+        out, seen, best = [], set(), {}
         for i, (_, tail_start, name) in enumerate(labels):
             stop = labels[i + 1][0] if i + 1 < len(labels) else len(text)
             segment = text[tail_start:stop]
@@ -211,16 +211,53 @@ class Extractor:
             if key in seen:
                 continue
             seen.add(key)
+            best[name.lower()] = max(
+                [best.get(name.lower()), (len(members), len(out))],
+                key=lambda x: (x or (-1, -1))[0])
             hedged = any(p in segment.lower() for p in
                          ("not a serious", "by no means", "not sure how serious"))
+            # "Drew and Barrett are on the outs" / "on the bottom" — the report
+            # naming who is being carried. Those members are the ones being
+            # PLAYED, so the rest of the group are the ones playing them.
+            played = set()
+            low = segment.lower()
+            for phrase in ("on the outs", "on the bottom", "being used",
+                           "doesn't know", "does not know"):
+                idx = 0
+                while True:
+                    idx = low.find(phrase, idx)
+                    if idx < 0:
+                        break
+                    # only the clause right before the phrase — a wider window
+                    # swallows the roster list and marks everyone as played
+                    head = segment[:idx]
+                    cut = max(head.rfind("."), head.rfind("("),
+                              head.rfind(";"), head.rfind(","))
+                    window = head[cut + 1:] if cut >= 0 else head
+                    if len(window.split()) < 2:      # e.g. cut right at a comma
+                        window = head[max(0, idx - 60):]
+                    for w in re.split(r"[^A-Za-z']+", window):
+                        hg = self.roster.resolve(w) if (self.roster and w) else None
+                        if hg and hg in members:
+                            played.add(hg)
+                    idx += len(phrase)
+            players = [m for m in members if m not in played]
+            one_sided = bool(played) and bool(players)
             out.append(AllianceProposal(
                 members=members, status="active",
                 confidence=0.6 if hedged else 0.9,
                 evidence=f"{name}: {roster_part.strip()}"[:300],
                 name=name or None,
+                one_sided=one_sided,
+                one_sided_by=players if one_sided else [],
                 source_hash=getattr(update, "content_hash", ""),
             ))
-        return out
+        # A name can appear more than once — the intro mentions a group in
+        # passing ("originally the Red Corner: Kamu, Chuk and Haley") before
+        # the list states it in full. Keep the fullest roster for each name so
+        # the result doesn't depend on which one is applied last.
+        keep = {i for _, i in best.values()}
+        return [a for i, a in enumerate(out) if i in keep]
 
     async def extract(self, updates: list, context_updates: list | None = None,
                       house_context: str = "", episode_airing: bool = False) -> Extraction:
