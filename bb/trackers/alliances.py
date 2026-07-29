@@ -450,6 +450,14 @@ class AllianceTracker:
                 "INSERT INTO alliance_evidence (alliance_id, quote, confidence, source_hash) "
                 "VALUES ($1, $2, $3, $4)",
                 row["id"], p.evidence, p.confidence, source_hash)
+            # The report is authoritative about WHO IS PLAYING WHOM too — feed
+            # chatter often gets this backwards and the flag then sticks
+            # forever. Applied even to locked alliances: a human confirming a
+            # group didn't vouch for a stale one-sided reading.
+            await self.db.execute(
+                "UPDATE alliances SET one_sided = $2, one_sided_by = $3 WHERE id = $1",
+                row["id"], bool(getattr(p, "one_sided", False)),
+                list(getattr(p, "one_sided_by", []) or []))
             if row["locked"]:
                 await self.db.execute(
                     "UPDATE alliances SET last_seen = now(), decayed_at = now() "
@@ -465,9 +473,37 @@ class AllianceTracker:
                     WHERE id = $1
                     """,
                     row["id"], max(float(p.confidence or 0), self.REPORT_FLOOR))
+            await self._absorb_unnamed_twin(row["id"], members)
             applied += 1
             log.info("alliance report: %s roster set to %s", name, members)
         return applied
+
+    async def _absorb_unnamed_twin(self, alliance_id: int, members: list[str]) -> None:
+        """Dissolve any OTHER live, unnamed alliance with the identical roster.
+
+        The house is tracked long before a name is published, so the same group
+        often exists twice — once unnamed from feed chatter, once named from
+        the report. Identical membership means identical group; the named one
+        wins. Named alliances are left alone: two names can legitimately cover
+        the same people.
+        """
+        rows = await self.db.fetch(
+            """
+            SELECT a.id, array_agg(m.houseguest) AS members
+            FROM alliances a
+            JOIN alliance_members m ON m.alliance_id = a.id AND m.active
+            WHERE a.id <> $1 AND a.name IS NULL
+              AND a.status IN ('forming', 'active')
+            GROUP BY a.id
+            """,
+            alliance_id)
+        target = set(members)
+        for r in rows:
+            if set(r["members"]) == target:
+                await self.db.execute(
+                    "UPDATE alliances SET status = 'dissolved' WHERE id = $1", r["id"])
+                log.info("alliance report: dissolved unnamed twin #%s of #%s",
+                         r["id"], alliance_id)
 
     async def set_members(self, alliance_id: int, members: list[str]) -> bool:
         """Replace an alliance's roster by hand — the repair tool for accreted
