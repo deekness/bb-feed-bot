@@ -877,7 +877,7 @@ class BBBot(commands.Bot):
                     for u in new_updates:
                         if u.content_hash not in report_hashes:
                             continue
-                        parsed = await self.extractor.parse_alliance_report(u)
+                        parsed = self.extractor.parse_alliance_report(u)
                         named = [a for a in parsed if a.name]
                         if named:
                             n = await self.alliances.apply_report(

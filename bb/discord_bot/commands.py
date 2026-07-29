@@ -627,7 +627,7 @@ class BBCommands(commands.Cog):
                     await self.bot.db.add_update(match)   # keep the full text
                     upd = match
 
-        proposals = await self.bot.extractor.parse_alliance_report(upd)
+        proposals = self.bot.extractor.parse_alliance_report(upd)
         named = [a for a in proposals if a.name]
         if not named:
             body = (upd.body or "")
