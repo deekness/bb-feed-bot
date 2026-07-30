@@ -62,6 +62,7 @@ class Season:
     rss_poll_interval_s: int = 600        # Jokers cadence (Bluesky stays 2min)
     episode_air_windows: dict = field(default_factory=dict)
     feeds_back_min_minutes: int = 20      # suppress 'feeds are back' below this
+    feeds_back_ping_minutes: int = 75     # @here only for outages this long
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -114,6 +115,7 @@ class Season:
             rss_poll_interval_s=int(data.get("rss_poll_interval_s", 600)),
             episode_air_windows=dict(data.get("episode_air_windows") or {}),
             feeds_back_min_minutes=int(data.get("feeds_back_min_minutes", 20)),
+            feeds_back_ping_minutes=int(data.get("feeds_back_ping_minutes", 75)),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
