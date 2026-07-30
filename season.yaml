@@ -56,6 +56,10 @@ rss_poll_interval_s: 600
 # Outages shorter than this (in minutes) are tracked but not announced.
 feeds_back_min_minutes: 20
 
+# A "feeds are back" this long means a comp/ceremony/lockdown just ended, so
+# the relay adds an @here. Shorter returns are relayed silently.
+feeds_back_ping_minutes: 75
+
 # Tried in order if the primary refuses the connection. The rss.* host has been
 # seen to drop TCP connections from Railway while the site itself is up.
 # NOTE: rss./forums./www.jokersupdates.com all resolve to the SAME IP
