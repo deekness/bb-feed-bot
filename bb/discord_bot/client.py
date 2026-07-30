@@ -548,6 +548,7 @@ class BBBot(commands.Bot):
         # Short blips are noise, especially overnight — a 7-minute WBRB isn't
         # news. Suppress "feeds are back" below the threshold; the state is
         # still recorded above, so /feeds stays accurate.
+        ping = False
         if sig["state"] == STATE_LIVE:
             mins = duration_minutes(sig["text"])
             floor = self.season.feeds_back_min_minutes
@@ -555,6 +556,10 @@ class BBBot(commands.Bot):
                 log.info("suppressing feeds-back relay (%dm outage, floor %dm)",
                          mins, floor)
                 return
+            # A long blackout means something happened — a comp, a ceremony,
+            # a lockdown — so the return is worth a ping. Short returns stay
+            # silent for whoever is awake. An unknown duration never pings.
+            ping = mins is not None and mins >= self.season.feeds_back_ping_minutes
 
         channel = await self.feeds_channel()
         if not channel:
@@ -565,8 +570,12 @@ class BBBot(commands.Bot):
         body = strip_hashtags(sig["text"])
         embed = discord.Embed(description=body, color=color,
                               timestamp=sig["created_at"])
-        await channel.send(embed=embed)
-        log.info("relayed feed-state post: %s", sig["state"])
+        await channel.send(
+            content="@here" if ping else None,
+            embed=embed,
+            allowed_mentions=discord.AllowedMentions(everyone=ping))
+        log.info("relayed feed-state post: %s%s", sig["state"],
+                 " (@here)" if ping else "")
 
     async def _feeds_are_live(self) -> bool:
         """False when hard game facts must NOT be written:
