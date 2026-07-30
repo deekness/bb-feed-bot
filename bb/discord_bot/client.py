@@ -502,12 +502,29 @@ class BBBot(commands.Bot):
         STATE_WBRB:    ("⏸️ WBRB — feeds are down", 0x95A5A6),
     }
 
-    @tasks.loop(seconds=60)
+    # While the feeds are DOWN, the return is the thing everyone is waiting
+    # for — a comp or ceremony result is about to be visible — so poll fast.
+    # While they're live there is nothing to hurry for, so back off. The
+    # endpoint is public, unauthenticated and tiny; the fast rate only runs
+    # during outages, which are a small share of the day.
+    FEEDSTATE_POLL_LIVE_S = 60
+    FEEDSTATE_POLL_DOWN_S = 15
+
+    @tasks.loop(seconds=15)
     async def feedstate_loop(self) -> None:
         try:
             await self._poll_feed_state()
         except Exception as e:
             log.error("feedstate loop error: %s", e)
+        # Re-pace for the state we're now in.
+        fs = await self.db.kv_get("feed_state") or {}
+        state = fs.get("state") if isinstance(fs, dict) else None
+        # Unknown state polls fast too: better to over-check than miss a return.
+        want = (self.FEEDSTATE_POLL_LIVE_S if state == STATE_LIVE
+                else self.FEEDSTATE_POLL_DOWN_S)
+        if self.feedstate_loop.seconds != want:
+            self.feedstate_loop.change_interval(seconds=want)
+            log.info("feed-state polling every %ds (state=%s)", want, state or "unknown")
 
     @feedstate_loop.before_loop
     async def _before_feedstate(self) -> None:
