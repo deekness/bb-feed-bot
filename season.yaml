@@ -60,6 +60,11 @@ feeds_back_min_minutes: 20
 # the relay adds an @here. Shorter returns are relayed silently.
 feeds_back_ping_minutes: 75
 
+# FeedBot's own status file. Their checker writes this BEFORE the Bluesky
+# account posts, so it's the primary signal for "feeds are back"; the account
+# remains the fallback. Tiny and ETag'd — most polls return 304.
+feedstate_api_url: "https://feedbot.liquid8d.dev/assets/bb28/latest.json"
+
 # Tried in order if the primary refuses the connection. The rss.* host has been
 # seen to drop TCP connections from Railway while the site itself is up.
 # NOTE: rss./forums./www.jokersupdates.com all resolve to the SAME IP
