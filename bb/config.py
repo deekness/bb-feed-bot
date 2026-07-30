@@ -63,6 +63,7 @@ class Season:
     episode_air_windows: dict = field(default_factory=dict)
     feeds_back_min_minutes: int = 20      # suppress 'feeds are back' below this
     feeds_back_ping_minutes: int = 75     # @here only for outages this long
+    feedstate_api_url: str = ""           # FeedBot status file (faster than the posts)
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -116,6 +117,7 @@ class Season:
             episode_air_windows=dict(data.get("episode_air_windows") or {}),
             feeds_back_min_minutes=int(data.get("feeds_back_min_minutes", 20)),
             feeds_back_ping_minutes=int(data.get("feeds_back_ping_minutes", 75)),
+            feedstate_api_url=str(data.get("feedstate_api_url", "") or ""),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
