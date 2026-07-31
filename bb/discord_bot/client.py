@@ -595,6 +595,11 @@ class BBBot(commands.Bot):
             # a lockdown — so the return is worth a ping. Short returns stay
             # silent for whoever is awake. An unknown duration never pings.
             ping = mins is not None and mins >= self.season.feeds_back_ping_minutes
+            # The API may have announced this same return a moment ago — it
+            # polls every 15s and doesn't wait for the post to appear.
+            if await self._feeds_back_already_announced():
+                log.info("feeds-back already announced — skipping the post relay")
+                return
 
         channel = await self.feeds_channel()
         if not channel:
@@ -609,8 +614,28 @@ class BBBot(commands.Bot):
             content="@here" if ping else None,
             embed=embed,
             allowed_mentions=discord.AllowedMentions(everyone=ping))
+        if sig["state"] == STATE_LIVE:
+            await self._mark_feeds_back_announced()
         log.info("relayed feed-state post: %s%s", sig["state"],
                  " (@here)" if ping else "")
+
+    # One feeds-return, one announcement — whichever source sees it first.
+    FEEDS_BACK_COOLDOWN_S = 30 * 60
+
+    async def _feeds_back_already_announced(self) -> bool:
+        last = await self.db.kv_get("feeds_back_announced_at")
+        if not last:
+            return False
+        try:
+            when = dt.datetime.fromisoformat(last)
+        except (ValueError, TypeError):
+            return False
+        return (dt.datetime.now(dt.timezone.utc) - when
+                ).total_seconds() < self.FEEDS_BACK_COOLDOWN_S
+
+    async def _mark_feeds_back_announced(self) -> None:
+        await self.db.kv_set("feeds_back_announced_at",
+                             dt.datetime.now(dt.timezone.utc).isoformat())
 
     async def _poll_feed_state_api(self) -> bool:
         """Announce a feeds-return straight from FeedBot's status file.
@@ -622,7 +647,14 @@ class BBBot(commands.Bot):
             return False
         data = await self.feedstate_api.fetch()
         if data is None:
-            return False                      # unchanged (304) or unreachable
+            # Watchdog: during an outage this file should change as their
+            # checker runs. Long silence means we're being served a stale copy
+            # and the Bluesky account is carrying the load — worth knowing.
+            api = self.feedstate_api
+            if api.unchanged_polls and api.unchanged_polls % 60 == 0:
+                log.warning("feed-state API unchanged for %d polls — possibly stale",
+                            api.unchanged_polls)
+            return False                      # unchanged or unreachable
         prev = await self.db.kv_get("feed_state") or {}
         prev_state, prev_since = prev.get("state"), prev.get("since")
         if data["state"] == prev_state:
@@ -653,6 +685,9 @@ class BBBot(commands.Bot):
         if mins < floor:
             log.info("feed-state API: feeds back after %dm (below %dm floor)", mins, floor)
             return True
+        if await self._feeds_back_already_announced():
+            log.info("feed-state API: return already announced — not repeating")
+            return True
         ping = mins >= self.season.feeds_back_ping_minutes
         channel = await self.feeds_channel()
         if channel:
@@ -663,6 +698,7 @@ class BBBot(commands.Bot):
             await channel.send(
                 content="@here" if ping else None, embed=embed,
                 allowed_mentions=discord.AllowedMentions(everyone=ping))
+        await self._mark_feeds_back_announced()
         log.info("feed-state API: relayed feeds-back after %dm%s", mins,
                  " (@here)" if ping else "")
         return True
