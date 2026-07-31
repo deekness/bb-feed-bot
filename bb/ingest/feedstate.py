@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import json
 import logging
+import time
 import re
 from datetime import datetime, timezone
 
@@ -112,17 +113,23 @@ class FeedStateApi:
         self.url = url
         self._etag: str | None = None
         self.consecutive_failures = 0
+        self.unchanged_polls = 0        # watchdog: a stale cache looks like this
 
     async def fetch(self) -> dict | None:
         """{'state', 'since' (aware UTC), 'raw'} or None if unchanged/failed."""
-        headers = {"User-Agent": _UA}
-        if self._etag:
-            headers["If-None-Match"] = self._etag
+        # It is a static asset on a CDN. Conditional GETs and edge caching kept
+        # handing back a stale "down" for an entire 3h46m outage — the bot never
+        # saw the feeds return. Ask for a fresh copy every time: the file is
+        # ~300 bytes, so freshness is worth far more than the saved bytes.
+        headers = {"User-Agent": _UA, "Cache-Control": "no-cache",
+                   "Pragma": "no-cache"}
+        url = f"{self.url}{'&' if '?' in self.url else '?'}t={int(time.time())}"
         try:
             async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(self.url, timeout=15) as resp:
+                async with session.get(url, timeout=15) as resp:
                     if resp.status == 304:
                         self.consecutive_failures = 0
+                        self.unchanged_polls += 1
                         return None                 # unchanged since last poll
                     if resp.status != 200:
                         self.consecutive_failures += 1
@@ -139,6 +146,7 @@ class FeedStateApi:
         since = data.get("since")
         if not status or not isinstance(since, (int, float)):
             return None
+        self.unchanged_polls = 0
         return {
             # Anything that isn't "up" means the feeds are not watchable. The
             # file doesn't distinguish anipals from WBRB; the Bluesky post does,
