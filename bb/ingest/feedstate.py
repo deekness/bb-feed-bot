@@ -95,68 +95,6 @@ _UA = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 "
        "(KHTML, like Gecko) Chrome/126.0 Safari/537.36")
 
 
-class FeedStateApi:
-    """FeedBot's own status file — the fastest signal available.
-
-    The Bluesky account is a *notification* the operator's checker emits after
-    it detects a change; this JSON is what the checker itself writes, so it
-    flips first (observed: site showing feeds back while the post had not
-    appeared). Tiny and ETag'd, so most polls cost a 304.
-
-        {"current": 1785443423, "status": "up", "since": 1785443063, ...}
-
-    `since` is the moment the CURRENT state began, so an outage's length is
-    exact arithmetic rather than text parsed out of a post.
-    """
-
-    def __init__(self, url: str):
-        self.url = url
-        self._etag: str | None = None
-        self.consecutive_failures = 0
-        self.unchanged_polls = 0        # watchdog: a stale cache looks like this
-
-    async def fetch(self) -> dict | None:
-        """{'state', 'since' (aware UTC), 'raw'} or None if unchanged/failed."""
-        # It is a static asset on a CDN. Conditional GETs and edge caching kept
-        # handing back a stale "down" for an entire 3h46m outage — the bot never
-        # saw the feeds return. Ask for a fresh copy every time: the file is
-        # ~300 bytes, so freshness is worth far more than the saved bytes.
-        headers = {"User-Agent": _UA, "Cache-Control": "no-cache",
-                   "Pragma": "no-cache"}
-        url = f"{self.url}{'&' if '?' in self.url else '?'}t={int(time.time())}"
-        try:
-            async with aiohttp.ClientSession(headers=headers) as session:
-                async with session.get(url, timeout=15) as resp:
-                    if resp.status == 304:
-                        self.consecutive_failures = 0
-                        self.unchanged_polls += 1
-                        return None                 # unchanged since last poll
-                    if resp.status != 200:
-                        self.consecutive_failures += 1
-                        log.warning("feed-state API HTTP %s", resp.status)
-                        return None
-                    self._etag = resp.headers.get("ETag")
-                    data = json.loads(await resp.text())
-        except Exception as e:
-            self.consecutive_failures += 1
-            log.warning("feed-state API failed: %s", e)
-            return None
-        self.consecutive_failures = 0
-        status = str(data.get("status", "")).strip().lower()
-        since = data.get("since")
-        if not status or not isinstance(since, (int, float)):
-            return None
-        self.unchanged_polls = 0
-        return {
-            # Anything that isn't "up" means the feeds are not watchable. The
-            # file doesn't distinguish anipals from WBRB; the Bluesky post does,
-            # and it arrives shortly after.
-            "state": STATE_LIVE if status == "up" else STATE_WBRB,
-            "since": datetime.fromtimestamp(float(since), tz=timezone.utc),
-            "raw": status,
-        }
-
-
 class FeedStateMonitor:
     def __init__(self, handle: str):
         self.handle = handle
