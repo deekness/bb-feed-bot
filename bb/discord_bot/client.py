@@ -30,7 +30,6 @@ from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
-                                FeedStateApi,
                                 FeedStateMonitor, duration_in,
                                 duration_minutes, strip_hashtags)
 from ..ingest.pipeline import IngestPipeline
@@ -41,17 +40,6 @@ from ..trackers.alliances import AllianceTracker
 from ..trackers.game_state import GameStateTracker
 from ..trackers.relationships import RelationshipTracker
 from ..trackers.votes import VoteTracker
-
-def _pretty_minutes(mins: int) -> str:
-    """'8 mins' / '1 hour 15 mins' — the upstream account's phrasing."""
-    h, m = divmod(max(0, int(mins)), 60)
-    parts = []
-    if h:
-        parts.append(f"{h} hour" + ("s" if h != 1 else ""))
-    if m or not h:
-        parts.append(f"{m} min" + ("s" if m != 1 else ""))
-    return " ".join(parts)
-
 
 log = logging.getLogger("bb.bot")
 
@@ -139,10 +127,6 @@ class BBBot(commands.Bot):
         sources = [self.rss_source, *extra,
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
-        # FeedBot's own status file flips before the Bluesky post appears, so
-        # it's the primary signal; the account stays wired as the fallback.
-        self.feedstate_api = (FeedStateApi(season.feedstate_api_url)
-                              if season.feedstate_api_url else None)
         self.pipeline = IngestPipeline(self.db, sources)
         self.extractor = Extractor(self.llm, self.roster)
         self.summarizer = Summarizer(self.llm, self.house_tz, self.roster,
@@ -518,11 +502,8 @@ class BBBot(commands.Bot):
         STATE_WBRB:    ("⏸️ WBRB — feeds are down", 0x95A5A6),
     }
 
-    # While the feeds are DOWN, the return is the thing everyone is waiting
-    # for — a comp or ceremony result is about to be visible — so poll fast.
-    # While they're live there is nothing to hurry for, so back off. The
-    # endpoint is public, unauthenticated and tiny; the fast rate only runs
-    # during outages, which are a small share of the day.
+    # While the feeds are DOWN, the return is what everyone is waiting for, so
+    # check the account more often; back off once they're live.
     FEEDSTATE_POLL_LIVE_S = 60
     FEEDSTATE_POLL_DOWN_S = 15
 
@@ -561,8 +542,6 @@ class BBBot(commands.Bot):
         """
         if not self._in_season():
             return
-        if await self._poll_feed_state_api():
-            return          # the API already announced this transition
         sig = await self.feedstate.fetch_signal()
         if sig is None:
             return
@@ -636,72 +615,6 @@ class BBBot(commands.Bot):
     async def _mark_feeds_back_announced(self) -> None:
         await self.db.kv_set("feeds_back_announced_at",
                              dt.datetime.now(dt.timezone.utc).isoformat())
-
-    async def _poll_feed_state_api(self) -> bool:
-        """Announce a feeds-return straight from FeedBot's status file.
-
-        Returns True when it handled a transition, so the Bluesky post that
-        follows a minute later is skipped rather than relayed twice.
-        """
-        if self.feedstate_api is None:
-            return False
-        data = await self.feedstate_api.fetch()
-        if data is None:
-            # Watchdog: during an outage this file should change as their
-            # checker runs. Long silence means we're being served a stale copy
-            # and the Bluesky account is carrying the load — worth knowing.
-            api = self.feedstate_api
-            if api.unchanged_polls and api.unchanged_polls % 60 == 0:
-                log.warning("feed-state API unchanged for %d polls — possibly stale",
-                            api.unchanged_polls)
-            return False                      # unchanged or unreachable
-        prev = await self.db.kv_get("feed_state") or {}
-        prev_state, prev_since = prev.get("state"), prev.get("since")
-        if data["state"] == prev_state:
-            return False                      # nothing changed
-        await self.db.kv_set("feed_state", {
-            "state": data["state"],
-            "since": data["since"].isoformat(),
-            "text": f"feeds {data['raw']}",
-            "post_url": prev.get("post_url"),
-            "source": "api",
-        })
-        if data["state"] != STATE_LIVE:
-            log.info("feed-state API: feeds went down")
-            return True                       # down transitions aren't relayed
-
-        # Outage length = time between the previous state starting and this one.
-        mins = None
-        if prev_since:
-            try:
-                started = dt.datetime.fromisoformat(prev_since)
-                mins = int((data["since"] - started).total_seconds() // 60)
-            except (ValueError, TypeError):
-                mins = None
-        if mins is None:
-            log.info("feed-state API: feeds back, unknown duration")
-            return True                       # can't size it: stay quiet, let /feeds show it
-        floor = self.season.feeds_back_min_minutes
-        if mins < floor:
-            log.info("feed-state API: feeds back after %dm (below %dm floor)", mins, floor)
-            return True
-        if await self._feeds_back_already_announced():
-            log.info("feed-state API: return already announced — not repeating")
-            return True
-        ping = mins >= self.season.feeds_back_ping_minutes
-        channel = await self.feeds_channel()
-        if channel:
-            _title, color = self._FEED_STATE_STYLE[STATE_LIVE]
-            embed = discord.Embed(
-                description=f"🚨 Feeds are back. (Duration: {_pretty_minutes(mins)}) 🚨",
-                color=color, timestamp=data["since"])
-            await channel.send(
-                content="@here" if ping else None, embed=embed,
-                allowed_mentions=discord.AllowedMentions(everyone=ping))
-        await self._mark_feeds_back_announced()
-        log.info("feed-state API: relayed feeds-back after %dm%s", mins,
-                 " (@here)" if ping else "")
-        return True
 
     async def _feeds_are_live(self) -> bool:
         """False when hard game facts must NOT be written:
