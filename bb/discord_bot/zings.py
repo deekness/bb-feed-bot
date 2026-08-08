@@ -234,6 +234,10 @@ _ZING_CRAFT = (
     "- Swear when it lands harder. Don't sprinkle profanity as seasoning.\n"
     "- If the material is thin, a savage generic burn beats a strained "
     "specific one. Never force a fact in just because you have it.\n"
+    "- NO CRIME OR VIOLENCE FRAMING. Don't reach for hostages, captors, "
+    "kidnapping, hate crimes, assault, murder or war as your comparison — it's "
+    "a lazy shelf, and it reads grim rather than funny. Compare them to "
+    "embarrassing, petty, mundane things; specificity beats escalation.\n"
 )
 
 _ZING_HEAT = (
@@ -287,7 +291,7 @@ _ZING_SYSTEM = (
     "- Nothing about their real life outside the show: family, trauma, private "
     "matters.\n"
     "These are real people. Roast the player and the ego, never their identity or "
-    "their body. It is a roast, not a hate crime.\n"
+    "their body.\n"
     "BANNED — these have all been used to death: counting how many alliances "
     "they are in ('in like four alliances'), listing alliance names, and the "
     "'group project' comparison. If your joke's engine is the NUMBER of "
