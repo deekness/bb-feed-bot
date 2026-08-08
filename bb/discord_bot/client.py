@@ -826,9 +826,11 @@ class BBBot(commands.Bot):
             if rows:
                 best = max(rows, key=lambda a: a["confidence"])
                 others = [m for m in best["members"] if m != name]
-                parts.append(
-                    f"{name} is in {len(rows)} tracked alliance(s); the firmest "
-                    f"is with {', '.join(others)}.")
+                # Deliberately NO count: the prompt bans "you're in N alliances"
+                # jokes, and handing over the number just re-invites them.
+                parts.append(f"{name}'s closest tie is with {', '.join(others)}.")
+                if len(rows) > 2:
+                    parts.append(f"{name} has side deals beyond that one.")
                 one_sided = [a for a in rows
                              if a.get("one_sided") and name not in (a.get("one_sided_by") or [])]
                 if one_sided:
