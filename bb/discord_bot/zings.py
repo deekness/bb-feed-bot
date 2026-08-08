@@ -69,10 +69,10 @@ ROASTS = [
   "If excuses burned calories, {name} would be absolutely shredded.",
   "{name} spends so much time talking about potential that scientists are considering it a renewable energy source.",
   "Nickname alert: \"Temu Superman.\" All the branding, none of the flight.",
-  "{name} has mastered the art of being confidently incorrect.",
+  "{name} is wrong at a volume most people reserve for being right.",
   "If self-awareness were a subscription service, {name}'s payment definitely bounced.",
   "{name} walks into every room like they own the place. The place is usually a disaster.",
-  "Some people are hard to figure out. {name} isn't one of them.",
+  "{name} thinks they're an enigma. You're a Wikipedia stub, buddy.",
   "{name} has the strategic mind of a squirrel crossing six lanes of traffic.",
   "If bad timing paid dividends, {name} would retire tomorrow.",
   "{name} acts mysterious. In reality, nobody's curious enough to investigate.",
@@ -81,18 +81,18 @@ ROASTS = [
   "Every group needs comic relief. Unfortunately, {name} wasn't trying to be funny.",
   "{name}'s biggest accomplishment is surviving the consequences of their own decisions.",
   "If overestimating yourself were an Olympic event, {name} would take gold and still complain about the judges.",
-  "{name} has all the charm of a software update at 2 AM.",
+  "{name} has the charm of a wet sock and the confidence of a man who has never been told no.",
   "You know how everyone has hidden talents? {name} should keep looking.",
   "Nickname alert: \"Budget Maverick.\" The danger is real, but none of it is intentional.",
   "{name} has a face for radio and a personality for airplane mode.",
   "If common sense were currency, {name} couldn't afford parking.",
   "{name} spends so much time chasing attention you'd think it owed them money.",
   "Some people learn from mistakes. {name} prefers a subscription model.",
-  "{name} has the reliability of a weather forecast written on a napkin.",
+  "Trusting {name} is like trusting a chair with three legs — technically it's furniture.",
   "If confidence and competence ever meet, {name} should introduce them.",
   "{name} treats accountability like it's a contagious disease.",
   "Nickname alert: \"Captain Almost.\" Always close enough to brag, never close enough to prove it.",
-  "{name} is living proof that enthusiasm and ability are not the same thing.",
+  "{name} brings the energy of a man who has never once been the smartest person in the room and has never once noticed.",
   "If life came with patch notes, half of {name}'s would be bug fixes.",
   "{name} has all the swagger of a celebrity and all the results of a parking cone.",
   "Nobody works harder than {name}... at explaining why something isn't their fault.",
@@ -102,7 +102,7 @@ ROASTS = [
   "{name} has turned lowering expectations into an art form.",
   "If secondhand embarrassment generated electricity, {name} could power a city block.",
   "{name} thinks they're keeping everyone guessing. Trust me, we figured it out.",
-  "Some people leave a lasting impression. {name} leaves a cautionary tale.",
+  "People don't remember {name}. They remember the feeling of wanting the conversation to end.",
   "{name}'s dating strategy appears to be confusing persistence with chemistry.",
   "If red flags were frequent flyer miles, {name} would travel for free.",
   "{name} has all the game of an unplugged arcade machine.",
@@ -127,7 +127,7 @@ ROASTS = [
   "Nickname alert: \"Discount James Bond.\" Licensed to disappoint.",
   "{name} has the problem-solving skills of a smoke detector with dead batteries.",
   "If life is a journey, {name} keeps missing the exits.",
-  "{name} makes simple mistakes with remarkable consistency.",
+  "{name} fails at things so basic it loops back around to impressive.",
   "Some people have a five-year plan. {name} has a five-minute panic.",
   "{name} has all the grace of a shopping cart with a broken wheel.",
   "If poor judgment burned fuel, {name} could orbit the Earth.",
@@ -171,7 +171,7 @@ ROASTS = [
   "Nickname alert: \"Budget Rockstar.\" Mostly feedback and noise.",
   "{name} treats criticism like it's fake news.",
   "If bad takes were baseball cards, {name} would have a complete collection.",
-  "{name} could make a winning position look challenging.",
+  "{name} has the strategic instincts of someone who reads the rules after they lose.",
   "Some people think before they speak. {name} likes surprises.",
   "{name} has all the reliability of a gas station horoscope.",
   "If confidence were oxygen, {name} would be a fire hazard.",
@@ -217,14 +217,36 @@ ROASTS = [
 
 
 # Zingbot's register when roasting a real houseguest: their GAME, not their person.
+_ZING_CRAFT = (
+    "CRAFT — this is what separates a zing from an observation:\n"
+    "- ONE target per zing. Pick the single funniest true thing and go all the "
+    "way in on it. Two facts in one line reads like a briefing, not a joke.\n"
+    "- The fact goes in the SETUP, never the punchline. 'Devens won HOH and "
+    "still...' — then the joke. Ending on the fact is just narration.\n"
+    "- Never list. No 'between the X, the Y, and the Z'. That is the forced "
+    "cadence of someone reading notes out loud.\n"
+    "- Do not explain the reference. If it needs the context spelled out, the "
+    "zing is wrong — pick something else.\n"
+    "- Best structure: a comparison that gets worse the longer you think about "
+    "it, or a straight statement of fact with one devastating twist.\n"
+    "- Say it like you're talking, not writing. Short. Contractions. Land it "
+    "and stop — no wind-up, no 'meanwhile', no summarising clause at the end.\n"
+    "- Swear when it lands harder. Don't sprinkle profanity as seasoning.\n"
+    "- If the material is thin, a savage generic burn beats a strained "
+    "specific one. Never force a fact in just because you have it.\n"
+)
+
 _ZING_SYSTEM = (
     "You are Zingbot 3000 from Big Brother: a cheesy, savage cornball robot who "
     "roasts houseguests on the live feeds. Write ONE zing (1-2 sentences) about the "
     "named houseguest — hard setup, harder punchline.\n"
-    "AUDIENCE: an adult Discord server. The register is hard-R roast comedy: crude, "
+    "AUDIENCE: an adult Discord server of obsessive feed-watchers who already know "
+    "everything happening in the house. The register is hard-R roast comedy: crude, "
     "profane (swearing is fine — the kind the network would bleep), filthy innuendo, "
-    "genuinely brutal. Do not be gentle, do not hedge, do not soften the landing. A "
-    "zing that does not sting is not a zing.\n"
+    "genuinely brutal. Do not be gentle, do not hedge, do not soften the landing. "
+    "A zing that does not sting is not a zing — and one that merely describes what "
+    "happened is worse than no zing at all.\n"
+    + _ZING_CRAFT +
     "FAIR GAME: their gameplay, garbage strategy, stupidity and terrible reads, ego, "
     "vanity, delusion, paranoia, thirst, desperation, showmance horniness, broken "
     "promises, comp failures, and how badly they are being played. Vanity IS fair "
@@ -243,6 +265,26 @@ _ZING_SYSTEM = (
     "MATERIAL: use the HOUSE STATE below so the zing lands on something real. If "
     "there is little to go on, roast them generically — never invent events.\n"
     "Do NOT add a ZING! sign-off; that gets appended for you. Output the zing only."
+)
+
+_ZING_MEMBER_SYSTEM = (
+    "You are Zingbot 3000 from Big Brother, roasting a member of a Big Brother "
+    "Discord server. Write ONE zing (1-2 sentences) — hard setup, harder "
+    "punchline.\n"
+    "AUDIENCE: an adult Discord server that asked for this. Hard-R roast comedy: "
+    "crude, profane, filthy innuendo, genuinely brutal. You know nothing about "
+    "this person except their display name, so roast the ARCHETYPE — the guy who "
+    "types in a Big Brother Discord at 2am, the poster, the reply guy, the one "
+    "with opinions about a stranger's veto strategy. Their name is a target if "
+    "it gives you something.\n"
+    + _ZING_CRAFT +
+    "OFF LIMITS — hard rules: nothing about race, ethnicity, gender, sexual "
+    "orientation, religion or disability; no sexually explicit description; no "
+    "body-shaming; nothing about their real life, job, family or mental health. "
+    "You do not know them — do not invent facts about them. Roast the poster, "
+    "not the person.\n"
+    "Refer to them by name at least once. Do NOT add a ZING! sign-off; that gets "
+    "appended for you. Output the zing only."
 )
 
 
@@ -272,6 +314,27 @@ class ZingCog(commands.Cog):
             text = None
         if not text:
             return self._next_line(name)
+        return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
+
+    async def _member_line(self, display_name: str) -> str:
+        """LLM-written roast of a server member; template if the LLM is down.
+
+        Templates are generic by necessity — the same fifty lines rotate, and
+        a generic burn can only ever be so sharp. Writing it live lets the zing
+        actually play off the person's name and the archetype of someone who
+        argues about veto strategy at 2am.
+        """
+        llm = getattr(self.bot, "llm", None)
+        if not (llm and llm.available):
+            return self._next_line(display_name)
+        try:
+            text = await llm.text(_ZING_MEMBER_SYSTEM,
+                                  f"Zing this Discord member: {display_name}",
+                                  max_tokens=150)
+        except Exception:
+            text = None
+        if not text:
+            return self._next_line(display_name)
         return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
 
     async def houseguest_autocomplete(
@@ -322,7 +385,7 @@ class ZingCog(commands.Cog):
             await interaction.followup.send(embed=embed)
             return
 
-        # --- member zing (unchanged behavior) ---
+        # --- member zing ---
         if target is None:
             humans = [m for m in interaction.guild.members if not m.bot]
             if not humans:
@@ -332,10 +395,12 @@ class ZingCog(commands.Cog):
                 return
             target = random.choice(humans)
 
+        await interaction.response.defer()
+        line = await self._member_line(target.display_name)
         embed = discord.Embed(
             title="🤖  ZINGBOT",
-            description=f"{target.mention}\n\n{self._next_line(target.display_name)}",
+            description=f"{target.mention}\n\n{line}",
             color=0xE91E63,
         )
         embed.set_footer(text="🤖 beep boop — get zinged")
-        await interaction.response.send_message(embed=embed)
+        await interaction.followup.send(embed=embed)
