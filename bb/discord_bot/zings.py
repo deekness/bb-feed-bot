@@ -262,8 +262,12 @@ _ZING_SYSTEM = (
     "matters.\n"
     "These are real people. Roast the player and the ego, never their identity or "
     "their body. It is a roast, not a hate crime.\n"
-    "MATERIAL: use the HOUSE STATE below so the zing lands on something real. If "
-    "there is little to go on, roast them generically — never invent events.\n"
+    "MATERIAL: the HOUSE STATE below is reference, not a checklist. Use ONE fact "
+    "from it — the one that fits your assigned angle — and ignore the rest. "
+    "Naming several alliances or several events in one line is the single most "
+    "common way these come out sounding like a briefing instead of a joke. If "
+    "there is little to go on for your angle, roast them generically on it — "
+    "never invent events.\n"
     "Do NOT add a ZING! sign-off; that gets appended for you. Output the zing only."
 )
 
@@ -273,10 +277,16 @@ _ZING_MEMBER_SYSTEM = (
     "punchline.\n"
     "AUDIENCE: an adult Discord server that asked for this. Hard-R roast comedy: "
     "crude, profane, filthy innuendo, genuinely brutal. You know nothing about "
-    "this person except their display name, so roast the ARCHETYPE — the guy who "
-    "types in a Big Brother Discord at 2am, the poster, the reply guy, the one "
-    "with opinions about a stranger's veto strategy. Their name is a target if "
-    "it gives you something.\n"
+    "this person except their display name, so roast the ARCHETYPE of a reality-TV "
+    "obsessive — but work the SPECIFIC ANGLE handed to you below, and build the "
+    "whole joke around that one angle.\n"
+    "VARIETY IS MANDATORY. These get spammed back to back in one channel, so a "
+    "recognisable formula dies instantly. Do NOT open with the time of day, do NOT "
+    "default to '<name>, sitting there at 2am...', and do NOT lean on their "
+    "username unless the angle explicitly says to. Vary how the line OPENS — "
+    "sometimes the name first, sometimes the image first, sometimes a flat "
+    "declaration, sometimes a question. If your first draft starts like a zing you "
+    "have written before, throw it out and write a different one.\n"
     + _ZING_CRAFT +
     "OFF LIMITS — hard rules: nothing about race, ethnicity, gender, sexual "
     "orientation, religion or disability; no sexually explicit description; no "
@@ -287,6 +297,43 @@ _ZING_MEMBER_SYSTEM = (
     "appended for you. Output the zing only."
 )
 
+
+# Same anti-formula treatment for houseguests: without a steer, every zing
+# becomes "here are the tracked facts about this person, strung together".
+_HOUSEGUEST_ANGLES = [
+    "their competition record, or the absence of one",
+    "how the house actually sees them versus how they think they're seen",
+    "one specific bad read or misplaced trust",
+    "their showmance, or their pursuit of one",
+    "the promises they've made that cannot all be kept",
+    "what they do when they're not playing the game — the bits, the noise",
+    "how they'd do if their closest ally left tomorrow",
+    "their paranoia, and how wrong it is",
+    "the strategy they describe versus the strategy they play",
+    "who is quietly using them",
+]
+
+# Zingbot cycles these so consecutive member zings don't all become the same
+# joke with different nouns. One is picked at random per call and handed to the
+# model as the angle to build on.
+_MEMBER_ANGLES = [
+    "their username — what it promises versus what it delivers",
+    "the confidence of their takes versus their track record of being right",
+    "how deeply they care about strangers who will never know they exist",
+    "what they'd actually be like as a houseguest — first one evicted, and why",
+    "their reaction when the feeds cut, treated as a genuine emotional event",
+    "the gap between how much of the season they've watched and how little "
+    "they've understood",
+    "them explaining Big Brother strategy to people who did not ask",
+    "their doomed loyalty to whichever houseguest they've adopted",
+    "how they'd handle real conflict, given how they handle a fake one on TV",
+    "the amount of their life this show has quietly consumed",
+    "their opinions on a comp they could not physically complete",
+    "how they behave in the group chat the moment something happens",
+    "the person they'd be in an alliance — the one who gets used and thanks you",
+    "them narrating the feeds to someone who is trying to sleep",
+    "their confidence in predictions that have never once been correct",
+]
 
 class ZingCog(commands.Cog):
     def __init__(self, bot):
@@ -307,8 +354,11 @@ class ZingCog(commands.Cog):
             return self._next_line(name)
         try:
             context = await self.bot.house_context()
+            angle = random.choice(_HOUSEGUEST_ANGLES)
             user = (f"HOUSE STATE: {context}\n\n" if context else "") + \
-                   f"Zing this houseguest: {name}"
+                   f"Zing this houseguest: {name}\n" \
+                   f"ANGLE for this one — build the joke on this and nothing " \
+                   f"else, ignore the rest of the house state: {angle}"
             text = await llm.text(_ZING_SYSTEM, user, max_tokens=150)
         except Exception:
             text = None
@@ -328,9 +378,12 @@ class ZingCog(commands.Cog):
         if not (llm and llm.available):
             return self._next_line(display_name)
         try:
-            text = await llm.text(_ZING_MEMBER_SYSTEM,
-                                  f"Zing this Discord member: {display_name}",
-                                  max_tokens=150)
+            angle = random.choice(_MEMBER_ANGLES)
+            text = await llm.text(
+                _ZING_MEMBER_SYSTEM,
+                f"Zing this Discord member: {display_name}\n"
+                f"ANGLE for this one — build the joke on this and nothing else: {angle}",
+                max_tokens=150)
         except Exception:
             text = None
         if not text:
