@@ -251,9 +251,11 @@ _ZING_HEAT = (
     "- Go one step past the joke you'd be comfortable with. Your instinct to pull "
     "the punch at the last second is the thing making these safe. Write the "
     "meaner version.\n"
-    "- Contempt reads funnier than cleverness here. 'buddy', 'my guy', 'girl' as "
-    "direct address; sentence fragments; the tone of someone who has watched this "
-    "person do something stupid and is done pretending otherwise.\n"
+    "- Contempt reads funnier than cleverness here: sentence fragments, and the "
+    "tone of someone who has watched this person do something stupid and is done "
+    "pretending otherwise. Direct address works, but VARY it and use it at most "
+    "once — 'buddy' in every zing is a tic, not a voice. Most zings need no "
+    "address at all.\n"
     "- Innuendo can be filthy. Sex jokes about their OWN thirst, desperation, "
     "showmance and how they'd behave given the chance — all fine, as long as you "
     "are not describing an actual sex act.\n"
@@ -341,6 +343,19 @@ _ZING_MEMBER_SYSTEM = (
 
 # Same anti-formula treatment for houseguests: without a steer, every zing
 # becomes "here are the tracked facts about this person, strung together".
+
+def _looks_truncated(text: str) -> bool:
+    """A zing cut off mid-sentence — the model hit the token ceiling. Appending
+    'ZING!' to a fragment reads like a bug, because it is one."""
+    t = (text or "").strip()
+    if not t:
+        return True
+    if t[-1] in ".!?\"'\u2019\u201d)":
+        return False
+    last = t.split()[-1] if t.split() else ""
+    return len(last) <= 2 or last[-1].isalnum()
+
+
 _HOUSEGUEST_ANGLES = [
     "their competition record, or the absence of one",
     "one thing they said out loud that they cannot walk back",
@@ -406,7 +421,7 @@ class ZingCog(commands.Cog):
                    f"Zing this houseguest: {name}\n" \
                    f"ANGLE for this one — build the joke on this and nothing " \
                    f"else, ignore the rest of the house state: {angle}"
-            text = await llm.text(_ZING_SYSTEM, user, max_tokens=150)
+            text = await llm.text(_ZING_SYSTEM, user, max_tokens=400)
         except Exception:
             text = None
         if not text:
@@ -430,10 +445,10 @@ class ZingCog(commands.Cog):
                 _ZING_MEMBER_SYSTEM,
                 f"Zing this Discord member: {display_name}\n"
                 f"ANGLE for this one — build the joke on this and nothing else: {angle}",
-                max_tokens=150)
+                max_tokens=400)
         except Exception:
             text = None
-        if not text:
+        if not text or _looks_truncated(text):
             return self._next_line(display_name)
         return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
 
