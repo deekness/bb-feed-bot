@@ -801,6 +801,44 @@ class BBBot(commands.Bot):
             log.error("house_context failed: %s", e)
         return " ".join(parts)
 
+    async def zing_context(self, name: str) -> str:
+        """Lean, single-houseguest context for a zing.
+
+        house_context lists up to eight alliances with full rosters, which
+        swamps everything else — so every zing collapsed into the same
+        "you're in four alliances" joke no matter which angle was assigned.
+        This gives only what is true of THIS houseguest, alliances reduced to
+        a count and their closest tie.
+        """
+        if self.roster.is_empty:
+            return ""
+        parts: list[str] = []
+        try:
+            week = self.game_state.current_week()
+            parts.append(f"Week {week}, Day {self.game_state.current_day()}.")
+            state = await self.game_state.current(week)
+            mine = [_ROLE_LABELS.get(role, role)
+                    for role, names in state.items() if name in names]
+            parts.append(f"{name} is currently: {', '.join(mine)}."
+                         if mine else f"{name} holds no title this week.")
+            rows = [a for a in await self.alliances.active()
+                    if name in a["members"] and (a["confidence"] >= 0.6 or a["locked"])]
+            if rows:
+                best = max(rows, key=lambda a: a["confidence"])
+                others = [m for m in best["members"] if m != name]
+                parts.append(
+                    f"{name} is in {len(rows)} tracked alliance(s); the firmest "
+                    f"is with {', '.join(others)}.")
+                one_sided = [a for a in rows
+                             if a.get("one_sided") and name not in (a.get("one_sided_by") or [])]
+                if one_sided:
+                    parts.append(f"{name} is being played in at least one of them.")
+            else:
+                parts.append(f"{name} is in no tracked alliance.")
+        except Exception as e:
+            log.error("zing_context failed: %s", e)
+        return " ".join(parts)
+
     async def recap_context(self) -> str:
         """house_context plus the tracked relationship beats and vote board —
         the richer state a daily/weekly recap should narrate around. Extraction

@@ -288,6 +288,11 @@ _ZING_SYSTEM = (
     "matters.\n"
     "These are real people. Roast the player and the ego, never their identity or "
     "their body. It is a roast, not a hate crime.\n"
+    "BANNED — these have all been used to death: counting how many alliances "
+    "they are in ('in like four alliances'), listing alliance names, and the "
+    "'group project' comparison. If your joke's engine is the NUMBER of "
+    "alliances, you have written the same zing as last time — find a different "
+    "angle on the same person.\n"
     "MATERIAL: the HOUSE STATE below is reference, not a checklist. Use ONE fact "
     "from it — the one that fits your assigned angle — and ignore the rest. "
     "Naming several alliances or several events in one line is the single most "
@@ -334,6 +339,12 @@ _ZING_MEMBER_SYSTEM = (
 # becomes "here are the tracked facts about this person, strung together".
 _HOUSEGUEST_ANGLES = [
     "their competition record, or the absence of one",
+    "one thing they said out loud that they cannot walk back",
+    "how they talk about themselves versus how they play",
+    "what they do all day when nothing is happening",
+    "their reaction the last time something went wrong for them",
+    "the specific person in the house they are most obviously afraid of",
+    "how they'd handle being on the block",
     "how the house actually sees them versus how they think they're seen",
     "one specific bad read or misplaced trust",
     "their showmance, or their pursuit of one",
@@ -385,7 +396,7 @@ class ZingCog(commands.Cog):
         if not (llm and llm.available):
             return self._next_line(name)
         try:
-            context = await self.bot.house_context()
+            context = await self.bot.zing_context(name)
             angle = random.choice(_HOUSEGUEST_ANGLES)
             user = (f"HOUSE STATE: {context}\n\n" if context else "") + \
                    f"Zing this houseguest: {name}\n" \
