@@ -120,29 +120,38 @@ class GameStateTracker:
                         "AND houseguest <> $3", wk, e.role, e.houseguest)
                 await self.db.execute(
                     """
-                    INSERT INTO game_state (week, role, houseguest, confidence, source_hash)
-                    VALUES ($1, $2, $3, $4, $5)
+                    INSERT INTO game_state (week, role, houseguest, confidence,
+                                            source_hash, detail)
+                    VALUES ($1, $2, $3, $4, $5, $6)
                     ON CONFLICT (week, role, houseguest) DO UPDATE
-                    SET confidence = GREATEST(game_state.confidence, EXCLUDED.confidence)
+                    SET confidence = GREATEST(game_state.confidence, EXCLUDED.confidence),
+                        -- keep a detail once we have one; a later vaguer
+                        -- mention must not wipe "Diamond Power of Veto"
+                        detail = CASE WHEN EXCLUDED.detail <> ''
+                                      THEN EXCLUDED.detail ELSE game_state.detail END
                     """,
                     wk, e.role, e.houseguest, e.confidence,
-                    getattr(e, "source_hash", ""),
+                    getattr(e, "source_hash", ""), getattr(e, "detail", "") or "",
                 )
             except Exception as ex:
                 log.error("game-state ingest failed: %s", ex)
 
     async def set_fact(self, role: str, houseguest: str,
-                       week: int | None = None) -> None:
+                       week: int | None = None, detail: str = "",
+                       expires_week: int | None = None) -> None:
         """Admin override: record a fact at full confidence."""
         week = week or self.current_week()
         await self.db.execute(
             """
-            INSERT INTO game_state (week, role, houseguest, confidence, source_hash)
-            VALUES ($1, $2, $3, 1.0, 'admin')
+            INSERT INTO game_state (week, role, houseguest, confidence,
+                                    source_hash, detail, expires_week)
+            VALUES ($1, $2, $3, 1.0, 'admin', $4, $5)
             ON CONFLICT (week, role, houseguest) DO UPDATE
-            SET confidence = 1.0, source_hash = 'admin', set_at = now()
+            SET confidence = 1.0, source_hash = 'admin', set_at = now(),
+                detail = CASE WHEN $4 <> '' THEN $4 ELSE game_state.detail END,
+                expires_week = COALESCE($5, game_state.expires_week)
             """,
-            week, role, houseguest,
+            week, role, houseguest, detail or "", expires_week,
         )
 
     async def remove_fact(self, role: str, houseguest: str,
