@@ -241,16 +241,46 @@ class BBCommands(commands.Cog):
             lines.append(f"💎 **Veto**  used on {', '.join(vu)}")
         if state.get("replacement_nominee"):
             lines.append(f"🔁 **Renom**  {', '.join(state['replacement_nominee'])}")
-        tc_pow = state.get("time_capsule_power", [])
-        tc_pun = state.get("time_capsule_punishment", [])
-        tc_sel = [n for n in state.get("time_capsule", [])
-                  if n not in tc_pow and n not in tc_pun]
-        if tc_pow or tc_pun or tc_sel:
+        # The Time Capsule runs all season — one houseguest a week for six
+        # weeks — so show every holder, not just this week's. POWERS persist
+        # until used, so they stay present tense; PUNISHMENTS expire with their
+        # week, so past ones read "had".
+        cap = await self.bot.db.fetch(
+            "SELECT week, role, houseguest, detail, expires_week FROM game_state "
+            "WHERE role LIKE 'time_capsule%' ORDER BY week, set_at")
+        if cap:
+            outcome, chosen = {}, {}
+            for r in cap:
+                if r["role"] == "time_capsule":
+                    chosen.setdefault(r["houseguest"], r["week"])
+                else:
+                    outcome[r["houseguest"]] = (
+                        r["role"], r["week"], (r["detail"] or "").strip(),
+                        r["expires_week"])
             bits = []
-            bits += [f"{n} — won a power" for n in tc_pow]
-            bits += [f"{n} — lost, has a punishment" for n in tc_pun]
-            bits += [f"{n} — outcome TBD" for n in tc_sel]
-            lines.append(f"🕰️ **Time Capsule**  {'; '.join(bits)}")
+            for hg, (role, wk, detail, expires) in outcome.items():
+                what = f" ({detail})" if detail else ""
+                if role == "time_capsule_power":
+                    # Powers last until used — but some carry a shelf life, and
+                    # an expired power is worth showing as spent, not live.
+                    if expires and week > expires:
+                        bits.append(f"{hg} — had a power{what}, expired")
+                    elif expires:
+                        left = expires - week
+                        when = ("expires this week" if left <= 0
+                                else f"expires week {expires}")
+                        bits.append(f"{hg} — has a power{what}, {when}")
+                    else:
+                        bits.append(f"{hg} — has a power{what}")
+                elif wk < week:
+                    bits.append(f"{hg} — had a punishment{what}")
+                else:
+                    bits.append(f"{hg} — has a punishment{what}")
+            for hg, wk in chosen.items():
+                if hg not in outcome:
+                    bits.append(f"{hg} — outcome TBD")
+            if bits:
+                lines.append("🕰️ **Time Capsule**  " + "; ".join(bits))
         if state.get("have_not"):
             lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
         # The Block Buster is played on eviction night, so it belongs to the
@@ -780,10 +810,14 @@ class BBCommands(commands.Cog):
         await interaction.response.send_message(msg, ephemeral=True)
 
     @app_commands.command(name="setgamestate", description="(Admin) Record a game-state fact (fix a miss).")
-    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee / have_not / block_buster",
+    @app_commands.describe(role="hoh / nominee / veto_winner / veto_used_on / evicted / replacement_nominee / have_not / block_buster / time_capsule*",
+                           detail="Optional: what the power or punishment IS",
+                           expires_week="Optional: last week a power can be used",
                            houseguest="Houseguest name", week="Week number (default: current)")
     async def setgamestate(self, interaction: discord.Interaction, role: str,
-                           houseguest: str, week: int | None = None):
+                           houseguest: str, week: int | None = None,
+                           detail: str | None = None,
+                           expires_week: int | None = None):
         if not self.bot.is_admin(interaction):
             await interaction.response.send_message("Admins only.", ephemeral=True)
             return
@@ -800,7 +834,8 @@ class BBCommands(commands.Cog):
             await interaction.response.send_message(
                 f"'{houseguest}' isn't on the roster.", ephemeral=True)
             return
-        await self.bot.game_state.set_fact(role, name, week)
+        await self.bot.game_state.set_fact(role, name, week, detail=detail or "",
+                                          expires_week=expires_week)
         wk = week or self.bot.game_state.current_week()
         await interaction.response.send_message(
             f"✅ Set: week {wk} {role} = {name}", ephemeral=True)
