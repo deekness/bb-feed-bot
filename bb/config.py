@@ -136,6 +136,7 @@ class Settings:
     llm_model_recap: str
     update_channel_id: int | None
     recap_channel_id: int | None
+    breaking_channel_id: int | None
     briefing_channel_id: int | None
     feeds_channel_id: int | None
     owner_id: int | None
@@ -164,6 +165,7 @@ class Settings:
             llm_model_recap=os.getenv("LLM_MODEL_RECAP", "").strip(),
             update_channel_id=opt_int("UPDATE_CHANNEL_ID"),
             recap_channel_id=opt_int("RECAP_CHANNEL_ID"),
+            breaking_channel_id=opt_int("BREAKING_CHANNEL_ID"),
             briefing_channel_id=opt_int("BRIEFING_CHANNEL_ID"),
             feeds_channel_id=opt_int("FEEDS_CHANNEL_ID"),
             owner_id=opt_int("OWNER_ID"),
