@@ -964,6 +964,18 @@ class BBBot(commands.Bot):
                     extraction.vote_plans = [
                         v for v in extraction.vote_plans
                         if hash_src.get(v.source_hash) != "bluesky"]
+                # A site's recap article recounts the WHOLE season — every HOH,
+                # every nominee, every veto — and booking those to the current
+                # week filled week 5 with week 1 facts. Digest sources never
+                # write game state or votes; they are for alliances and archive
+                # depth. Live feeds are the only source of record.
+                if self.digest_sources:
+                    extraction.game_events = [
+                        e for e in extraction.game_events
+                        if hash_src.get(e.source_hash) not in self.digest_sources]
+                    extraction.vote_plans = [
+                        v for v in extraction.vote_plans
+                        if hash_src.get(v.source_hash) not in self.digest_sources]
                 # A published ALLIANCE REPORT is authoritative: for the groups
                 # it names, its roster replaces ours (ordinary chatter can only
                 # add members, which is why merged rosters used to persist).

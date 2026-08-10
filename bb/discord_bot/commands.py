@@ -253,10 +253,19 @@ class BBCommands(commands.Cog):
             lines.append(f"🕰️ **Time Capsule**  {'; '.join(bits)}")
         if state.get("have_not"):
             lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
-        if state.get("block_buster"):
+        # The Block Buster is played on eviction night, so it belongs to the
+        # week that is closing. Showing it mid-week means it leaked from the
+        # previous one.
+        if state.get("block_buster") and state.get("evicted"):
             lines.append(f"🧱 **Block Buster**  {', '.join(state['block_buster'])} — saved themselves")
-        if state.get("evicted"):
-            lines.append(f"🚪 **Evicted**  {', '.join(state['evicted'])}")
+        # Evictions are cumulative — the jury/graveyard is season-long, not a
+        # per-week fact, so show everyone who has left in the order they went.
+        gone = await self.bot.db.fetch(
+            "SELECT houseguest FROM game_state WHERE role = 'evicted' "
+            "ORDER BY week, set_at")
+        names = list(dict.fromkeys(r["houseguest"] for r in gone))
+        if names:
+            lines.append(f"🚪 **Evicted**  {', '.join(names)}")
 
         embed.description = "\n".join(lines)
         await interaction.followup.send(embed=embed)
