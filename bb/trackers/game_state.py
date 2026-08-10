@@ -91,6 +91,11 @@ class GameStateTracker:
     # earlier.
     _CLOSING_ROLES = ("evicted", "block_buster")
 
+    # Exactly one houseguest can hold these in a given week. If a new one is
+    # recorded, it REPLACES the old — otherwise a mis-extraction (or a recap
+    # article) leaves week 5 showing four different HOHs at once.
+    _SINGLE_HOLDER = ("hoh", "veto_winner", "block_buster")
+
     async def ingest(self, events: list) -> None:
         week = self.current_week()
         closing_week = self.current_week(
@@ -109,6 +114,10 @@ class GameStateTracker:
                          e.role, e.houseguest, prereq)
                 continue
             try:
+                if e.role in self._SINGLE_HOLDER:
+                    await self.db.execute(
+                        "DELETE FROM game_state WHERE week = $1 AND role = $2 "
+                        "AND houseguest <> $3", wk, e.role, e.houseguest)
                 await self.db.execute(
                     """
                     INSERT INTO game_state (week, role, houseguest, confidence, source_hash)
