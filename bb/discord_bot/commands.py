@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbriefingchannel, /setfeedschannel, /status,
+        /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbreakingchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -956,8 +956,27 @@ class BBCommands(commands.Cog):
         await self.bot.db.kv_set("recap_channel_id", channel.id)
         await interaction.response.send_message(
             f"📅 Daily & weekly recaps will now post in {channel.mention}. "
-            "Everything else (hourly summaries, 🚨 Breaking, feed state) stays in "
-            "the main channel.", ephemeral=True)
+            "🚨 Breaking follows this channel too unless /setbreakingchannel "
+            "says otherwise; hourly summaries and feed state stay in the main "
+            "channel.", ephemeral=True)
+
+    @app_commands.command(
+        name="setbreakingchannel",
+        description="(Admin) Send 🚨 Breaking alerts to a different channel.")
+    @app_commands.describe(channel="Where breaking alerts go. Omit to follow the recap channel.")
+    async def setbreakingchannel(self, interaction: discord.Interaction,
+                                 channel: discord.TextChannel | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        if channel is None:
+            await self.bot.db.kv_set("breaking_channel_id", None)
+            await interaction.response.send_message(
+                "Breaking alerts will follow the recap channel again.", ephemeral=True)
+            return
+        await self.bot.db.kv_set("breaking_channel_id", channel.id)
+        await interaction.response.send_message(
+            f"🚨 Breaking alerts will now post in {channel.mention}.", ephemeral=True)
 
     @app_commands.command(name="status", description="(Admin) Show bot status.")
     async def status(self, interaction: discord.Interaction):

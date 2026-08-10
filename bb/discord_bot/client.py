@@ -215,6 +215,20 @@ class BBBot(commands.Bot):
         log.warning("recap channel %s not found — falling back to updates", cid)
         return await self.update_channel()
 
+    async def breaking_channel(self) -> discord.TextChannel | None:
+        """Where 🚨 Breaking alerts go. Defaults to the recap channel (which
+        itself falls back to the main update channel), so setting nothing keeps
+        alerts with the other digest posts rather than in the raw feed."""
+        cid = (await self.db.kv_get("breaking_channel_id")
+               or self.settings.breaking_channel_id)
+        if not cid:
+            return await self.recap_channel()
+        ch = self.get_channel(int(cid))
+        if isinstance(ch, discord.TextChannel):
+            return ch
+        log.warning("breaking channel %s not found — falling back to recap", cid)
+        return await self.recap_channel()
+
     async def feeds_channel(self) -> discord.TextChannel | None:
         """Where feed-state alerts (feeds back / down) go. Falls back to the
         main update channel."""
@@ -945,9 +959,11 @@ class BBBot(commands.Bot):
                     self._breaking_last[key] = now_mono
                     self._breaking_recent.append(line)
                     del self._breaking_recent[:-8]   # keep the last few only
-                    await channel.send(embed=discord.Embed(
-                        title="🚨 Breaking", description=line,
-                        color=0xE74C3C, timestamp=dt.datetime.now(self.tz)))
+                    bchannel = await self.breaking_channel()
+                    if bchannel:
+                        await bchannel.send(embed=discord.Embed(
+                            title="🚨 Breaking", description=line,
+                            color=0xE74C3C, timestamp=dt.datetime.now(self.tz)))
 
             if self.llm.available and not self.roster.is_empty:
                 context = await self.house_context()
