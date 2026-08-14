@@ -822,7 +822,7 @@ class BBBot(commands.Bot):
         swamps everything else — so every zing collapsed into the same
         "you're in four alliances" joke no matter which angle was assigned.
         This gives only what is true of THIS houseguest, alliances reduced to
-        a count and their closest tie.
+        a count and their strongest alliance.
         """
         if self.roster.is_empty:
             return ""
@@ -842,9 +842,14 @@ class BBBot(commands.Bot):
                 others = [m for m in best["members"] if m != name]
                 # Deliberately NO count: the prompt bans "you're in N alliances"
                 # jokes, and handing over the number just re-invites them.
-                parts.append(f"{name}'s closest tie is with {', '.join(others)}.")
+                # Say GAME ALLIANCE explicitly. "closest tie" and "side deals"
+                # read as romance, and the zings duly invented showmances that
+                # do not exist — a strategic partner became a crush.
+                parts.append(
+                    f"{name}'s strongest game alliance (strategic, not romantic) "
+                    f"is with {', '.join(others)}.")
                 if len(rows) > 2:
-                    parts.append(f"{name} has side deals beyond that one.")
+                    parts.append(f"{name} also works with people outside it.")
                 one_sided = [a for a in rows
                              if a.get("one_sided") and name not in (a.get("one_sided_by") or [])]
                 if one_sided:
