@@ -63,6 +63,11 @@ URGENT_KEYWORDS = (
     # blowups
     "screaming match", "blowup", "blow up", "shouting match", "fight broke out",
     "got into it", "yelling at", "screaming at", "in tears", "stormed off",
+    # in-progress phrasings — updaters type these DURING a confrontation
+    "arguing with", "are arguing", "is arguing", "argument between",
+    "confronting", "confronts", "going off on", "went off on",
+    "getting heated", "heated argument", "house meeting", "calling out",
+    "raised voices", "shouting at", "yelling", "in a fight",
 )
 
 _NEUTRALITY = (
@@ -234,7 +239,12 @@ _EVENT_CATEGORY = (
                       "coup")),
     ("blowup",       ("screaming match", "blowup", "blow up", "shouting match",
                       "fight broke out", "got into it", "yelling at",
-                      "screaming at", "in tears", "stormed off")),
+                      "screaming at", "in tears", "stormed off",
+                      "arguing with", "are arguing", "is arguing",
+                      "argument between", "confronting", "confronts",
+                      "going off on", "went off on", "getting heated",
+                      "heated argument", "house meeting", "calling out",
+                      "raised voices", "shouting at", "yelling", "in a fight")),
 )
 
 
@@ -364,6 +374,15 @@ class Summarizer:
             "HAPPENED: a competition was won, a ceremony concluded, someone was "
             "nominated/evicted/removed/walked, a major twist occurred, or a "
             "serious fight/blowup broke out.\n"
+            "CONFRONTATIONS ARE THE EXCEPTION TO 'COMPLETED'. A fight, screaming "
+            "match, confrontation or house meeting is breaking WHILE IT IS "
+            "HAPPENING — that is when people want to open the feeds. Do not wait "
+            "for it to finish, and do not require an outcome. If the update shows "
+            "an argument underway, alert on it immediately and write it in the "
+            "PRESENT tense: 'LaTrice and Haley are arguing in the kitchen' — not "
+            "'got into an argument'. Say where it is happening if the update says. "
+            "Still SKIP mere tension, sulking, or someone talking ABOUT a past "
+            "argument.\n"
             "The sentence must be plain, factual, and self-contained. Do not "
             "copy the updater's shorthand, timestamps, or tags like (NT)."
         )
