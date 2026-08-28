@@ -16,6 +16,7 @@ from __future__ import annotations
 import asyncio
 import datetime as dt
 import logging
+import random
 import re
 import time
 from zoneinfo import ZoneInfo
@@ -29,6 +30,8 @@ from ..analysis.summarize import (Summarizer, event_category, sentence_clamp,
 from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
+from ..ingest.kalshi import KalshiWatcher, detect_drops
+from .zings import PRODUCTION_ROAST_ANGLES, production_roast
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
                                 FeedStateMonitor, duration_in,
                                 duration_minutes, strip_hashtags)
@@ -127,6 +130,10 @@ class BBBot(commands.Bot):
         sources = [self.rss_source, *extra,
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
+        # Winner-market watcher: during a blackout a leaked result shows up as
+        # a price collapse before it shows up anywhere readable.
+        self.kalshi = (KalshiWatcher(season.kalshi_event_ticker, roster=self.roster)
+                       if season.kalshi_event_ticker else None)
         self.pipeline = IngestPipeline(self.db, sources)
         self.extractor = Extractor(self.llm, self.roster)
         self.summarizer = Summarizer(self.llm, self.house_tz, self.roster,
@@ -185,6 +192,10 @@ class BBBot(commands.Bot):
         self.briefing_loop.start()
         if self.season.feedstate_enabled:
             self.feedstate_loop.start()
+            self.feeds_down_loop.start()
+            if self.kalshi is not None:
+                self.market_loop.start()
+                log.info("watching winner market %s", self.season.kalshi_event_ticker)
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%d guilds)", self.user, len(self.guilds))
@@ -520,6 +531,140 @@ class BBBot(commands.Bot):
     # check the account more often; back off once they're live.
     FEEDSTATE_POLL_LIVE_S = 60
     FEEDSTATE_POLL_DOWN_S = 15
+    # A planned multi-day blackout is not a comp break — nobody is refreshing
+    # for it, and 15s polling for three days is 17k pointless requests. After
+    # this long down, ease off until something changes.
+    FEEDSTATE_LONG_DOWN_S = 2 * 3600
+    FEEDSTATE_POLL_LONG_S = 120
+
+    @tasks.loop(minutes=10)
+    async def market_loop(self) -> None:
+        """Watch the winner market for a leak-shaped move."""
+        try:
+            await self._poll_market()
+        except Exception as e:
+            log.error("market loop error: %s", e)
+
+    @market_loop.before_loop
+    async def _before_market(self) -> None:
+        await self.wait_until_ready()
+
+    async def _poll_market(self) -> None:
+        if self.kalshi is None or not self._in_season():
+            return
+        cur = await self.kalshi.fetch()
+        if not cur:
+            return
+        prev = await self.db.kv_get("kalshi_prices") or {}
+        await self.db.kv_set("kalshi_prices", cur)
+        if not prev:
+            return                      # first run: establish a baseline only
+        hits = detect_drops(
+            prev, cur,
+            min_drop=self.season.market_min_drop,
+            min_volume=self.season.market_min_volume,
+            min_price=self.season.market_min_price)
+        if not hits:
+            return
+        last = await self.db.kv_get("kalshi_alert_at")
+        if last:
+            try:
+                age = (dt.datetime.now(dt.timezone.utc)
+                       - dt.datetime.fromisoformat(last)).total_seconds()
+                if age < 6 * 3600:
+                    return              # one alert per swing, not per poll
+            except (ValueError, TypeError):
+                pass
+        await self.db.kv_set("kalshi_alert_at",
+                             dt.datetime.now(dt.timezone.utc).isoformat())
+        top = hits[0]
+        # Market moves go to the briefing channel, pinged: a leaked result is
+        # the one thing during a blackout that people want to know immediately.
+        channel = await self.briefing_channel()
+        if not channel:
+            return
+        # Spoilered: this may be a real result nobody has aired yet, so anyone
+        # avoiding spoilers shouldn't have it forced into their eye line.
+        embed = discord.Embed(
+            title="📉 Unusual market movement",
+            description=(
+                f"||**{top['houseguest']}**||'s odds to win BB28 just fell from "
+                f"**{top['from']}%** to **{top['to']}%** on {top['traded']:,} "
+                f"contracts traded.\n\n"
+                "Sharp drops on real volume sometimes mean a result has leaked "
+                "to people who trade on it. It can also be nothing — these "
+                "markets are thin."),
+            color=0x9B59B6, timestamp=dt.datetime.now(self.tz))
+        if len(hits) > 1:
+            embed.add_field(
+                name="Also falling",
+                value=", ".join(f"||{h['houseguest']}|| {h['from']}→{h['to']}%"
+                                for h in hits[1:4]),
+                inline=False)
+        embed.set_footer(text="Prediction-market movement, not a confirmed result.")
+        await channel.send(
+            content="@here", embed=embed,
+            allowed_mentions=discord.AllowedMentions(everyone=True))
+        log.info("market alert: %s %s->%s on %s traded",
+                 top["houseguest"], top["from"], top["to"], top["traded"])
+
+    @tasks.loop(minutes=30)
+    async def feeds_down_loop(self) -> None:
+        """While the feeds are dark, keep the channel alive with a roast."""
+        try:
+            await self._maybe_roast_the_blackout()
+        except Exception as e:
+            log.error("feeds-down loop error: %s", e)
+
+    @feeds_down_loop.before_loop
+    async def _before_feeds_down(self) -> None:
+        await self.wait_until_ready()
+
+    async def _maybe_roast_the_blackout(self) -> None:
+        if not self._in_season():
+            return
+        fs = await self.db.kv_get("feed_state") or {}
+        if not isinstance(fs, dict) or fs.get("state") == STATE_LIVE:
+            return
+        since = fs.get("since")
+        if not since:
+            return
+        try:
+            down_for = (dt.datetime.now(dt.timezone.utc)
+                        - dt.datetime.fromisoformat(since)).total_seconds()
+        except (ValueError, TypeError):
+            return
+        # Comps and ceremonies take the feeds for an hour or two and nobody
+        # needs a joke about it. This is for the long, deliberate blackouts.
+        if down_for < self.FEEDSTATE_LONG_DOWN_S:
+            return
+        last = await self.db.kv_get("blackout_roast_at")
+        if last:
+            try:
+                age = (dt.datetime.now(dt.timezone.utc)
+                       - dt.datetime.fromisoformat(last)).total_seconds()
+                if age < self.season.blackout_roast_hours * 3600:
+                    return
+            except (ValueError, TypeError):
+                pass
+        hours = int(down_for // 3600)
+        twist = await self.db.kv_get("twist_note") or ""
+        context = (f"The live feeds have been down for about {hours} hours."
+                   + (f" {twist}" if twist else ""))
+        text = await production_roast(
+            self.llm, context, random.choice(PRODUCTION_ROAST_ANGLES))
+        if not text:
+            return
+        channel = await self.feeds_channel()
+        if not channel:
+            return
+        await self.db.kv_set("blackout_roast_at",
+                             dt.datetime.now(dt.timezone.utc).isoformat())
+        await channel.send(embed=discord.Embed(
+            title=f"📵 Still no feeds — hour {hours}",
+            description=text, color=0x95A5A6,
+            timestamp=dt.datetime.now(self.tz)))
+        log.info("posted blackout roast (hour %d)", hours)
 
     @tasks.loop(seconds=15)
     async def feedstate_loop(self) -> None:
@@ -531,8 +676,20 @@ class BBBot(commands.Bot):
         fs = await self.db.kv_get("feed_state") or {}
         state = fs.get("state") if isinstance(fs, dict) else None
         # Unknown state polls fast too: better to over-check than miss a return.
-        want = (self.FEEDSTATE_POLL_LIVE_S if state == STATE_LIVE
-                else self.FEEDSTATE_POLL_DOWN_S)
+        if state == STATE_LIVE:
+            want = self.FEEDSTATE_POLL_LIVE_S
+        else:
+            down_for = 0.0
+            since = fs.get("since") if isinstance(fs, dict) else None
+            if since:
+                try:
+                    down_for = (dt.datetime.now(dt.timezone.utc)
+                                - dt.datetime.fromisoformat(since)).total_seconds()
+                except (ValueError, TypeError):
+                    down_for = 0.0
+            want = (self.FEEDSTATE_POLL_LONG_S
+                    if down_for > self.FEEDSTATE_LONG_DOWN_S
+                    else self.FEEDSTATE_POLL_DOWN_S)
         if self.feedstate_loop.seconds != want:
             self.feedstate_loop.change_interval(seconds=want)
             log.info("feed-state polling every %ds (state=%s)", want, state or "unknown")
@@ -800,6 +957,12 @@ class BBBot(commands.Bot):
         try:
             week = self.game_state.current_week()
             parts.append(f"Week {week}, Day {self.game_state.current_day()}.")
+            # A twist can suspend the normal week entirely (no HOH, no veto,
+            # feeds off for days). Without being told, the bot reports the
+            # missing pieces as gaps or invents them.
+            twist = await self.db.kv_get("twist_note")
+            if twist:
+                parts.append(f"ACTIVE TWIST: {twist}")
             state = await self.game_state.current(week)
             for role, names in state.items():
                 parts.append(f"{_ROLE_LABELS.get(role, role)}: {', '.join(names)}.")

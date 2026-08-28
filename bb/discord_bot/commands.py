@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /setchannel, /setrecapchannel, /setbreakingchannel, /setbriefingchannel, /setfeedschannel, /status,
+        /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /settwist, /setchannel, /setrecapchannel, /setbreakingchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -977,6 +977,26 @@ class BBCommands(commands.Cog):
         await self.bot.db.kv_set("breaking_channel_id", channel.id)
         await interaction.response.send_message(
             f"🚨 Breaking alerts will now post in {channel.mention}.", ephemeral=True)
+
+    @app_commands.command(
+        name="settwist",
+        description="(Admin) Tell the bot about an active twist.")
+    @app_commands.describe(
+        note="What's going on this week. Omit to clear it.")
+    async def settwist(self, interaction: discord.Interaction,
+                       note: str | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        if not note:
+            await self.bot.db.kv_set("twist_note", None)
+            await interaction.response.send_message(
+                "Twist note cleared — back to a normal week.", ephemeral=True)
+            return
+        await self.bot.db.kv_set("twist_note", note[:500])
+        await interaction.response.send_message(
+            f"🌀 Recorded. Every summary, recap and /ask now knows:\n> {note[:500]}",
+            ephemeral=True)
 
     @app_commands.command(name="status", description="(Admin) Show bot status.")
     async def status(self, interaction: discord.Interaction):

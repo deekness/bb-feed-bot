@@ -379,6 +379,63 @@ _ZING_MEMBER_SYSTEM = (
 # Same anti-formula treatment for houseguests: without a steer, every zing
 # becomes "here are the tracked facts about this person, strung together".
 
+_PRODUCTION_ROAST_SYSTEM = (
+    "You are Zingbot 3000, and the feeds are OFF. Production has pulled the "
+    "live feeds and left the fans with nothing. Write ONE short post (1-3 "
+    "sentences) roasting the SHOW and its PRODUCTION for it.\n"
+    "AUDIENCE: adult live-feed subscribers who pay for this and are currently "
+    "staring at an empty screen. They are on your side. Be funny about their "
+    "situation, never sneering at them for caring.\n"
+    + _ZING_CRAFT + _ZING_HEAT +
+    "FAIR GAME: the twist itself and how contrived it is, producers scripting "
+    "the game, cutting the feeds to protect a story beat, the theme, the "
+    "budget, the network, charging a subscription for a screen of animals, "
+    "the endless teasing of 'the biggest twist ever'. Name the executive "
+    "producer if it lands — their PROFESSIONAL decisions are fair game the way "
+    "any public figure's work is.\n"
+    "OFF LIMITS: anything about a real person's appearance, body, family, "
+    "private life, health, or any protected characteristic. Roast the "
+    "DECISIONS and the SHOW, never the human. No threats, no wishing harm, "
+    "nothing that reads as abuse rather than a joke.\n"
+    "Vary the angle every time — do not open the same way twice. Output the "
+    "post only, no sign-off."
+)
+
+
+async def production_roast(llm, context: str, angle: str) -> str | None:
+    """A spicy 'the feeds are still off' post. None if the LLM is unavailable."""
+    if not (llm and llm.available):
+        return None
+    try:
+        text = await llm.text(
+            _PRODUCTION_ROAST_SYSTEM,
+            f"SITUATION: {context}\n"
+            f"ANGLE for this one — build the whole post on this: {angle}",
+            max_tokens=400)
+    except Exception:
+        return None
+    if not text or _looks_truncated(text):
+        return None
+    return text.strip()
+
+
+# Rotated so a six-hourly post doesn't become the same complaint on a loop.
+PRODUCTION_ROAST_ANGLES = [
+    "paying a subscription to watch a screen of animals",
+    "the twist being hyped for weeks and amounting to a themed party",
+    "production deciding fans cannot be trusted with information they paid for",
+    "how transparently the whole thing exists to protect an episode's story",
+    "the gap between 'unprecedented twist' and what is actually happening",
+    "the feeds being the entire reason anyone subscribes",
+    "what the houseguests are doing right now that nobody is allowed to see",
+    "the theme itself and how much it cost to build",
+    "how a show about surveillance solved its problem by switching off cameras",
+    "the network's confidence that people will still be here on Sunday",
+    "being told to go outside and smell the flowers",
+    "the countdown to the feeds returning becoming the most exciting part",
+]
+
+
 def _looks_truncated(text: str) -> bool:
     """A zing cut off mid-sentence — the model hit the token ceiling. Appending
     'ZING!' to a fragment reads like a bug, because it is one."""
@@ -444,11 +501,32 @@ class ZingCog(commands.Cog):
         roast = ROASTS[self._bag.pop()].format(name=name)
         return f"{roast}  {random.choice(ZING_SIGNOFFS)}"
 
+    # Not houseguests — production. Picking one of these routes to the hotter
+    # prompt: a producer's decisions are fair game in a way a player's are not,
+    # and this is the register the server actually wants for them.
+    PRODUCTION_TARGETS = {
+        "grodner": "Allison Grodner",
+        "allison grodner": "Allison Grodner",
+        "production": "production",
+        "big brother production": "production",
+    }
+
     async def _houseguest_line(self, name: str) -> str:
         """Game-aware zing from tracked house state; generic template if no LLM."""
         llm = getattr(self.bot, "llm", None)
         if not (llm and llm.available):
             return self._next_line(name)
+        who = self.PRODUCTION_TARGETS.get(name.strip().lower())
+        if who:
+            twist = await self.bot.db.kv_get("twist_note") or ""
+            context = (f"Roast {who}, the people who make this show. "
+                       + (f"Current twist: {twist}" if twist else
+                          "General grievances about how the show is produced."))
+            text = await production_roast(
+                llm, context, random.choice(PRODUCTION_ROAST_ANGLES))
+            if text:
+                return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
+            return self._next_line(who)
         try:
             context = await self.bot.zing_context(name)
             angle = random.choice(_HOUSEGUEST_ANGLES)
@@ -490,7 +568,8 @@ class ZingCog(commands.Cog):
     async def houseguest_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> list[app_commands.Choice[str]]:
-        names = getattr(self.bot.roster, "names", [])
+        names = list(getattr(self.bot.roster, "names", []))
+        names += ["Allison Grodner", "Production"]
         cur = current.lower()
         return [app_commands.Choice(name=n, value=n)
                 for n in sorted(names) if cur in n.lower()][:25]
@@ -518,7 +597,10 @@ class ZingCog(commands.Cog):
 
         # --- houseguest zing (roster-gated, LLM-written when possible) ---
         if houseguest:
-            canon = self.bot.roster.resolve(houseguest)
+            # Production targets bypass the roster gate — they're real people
+            # connected to the show, just not playing it.
+            canon = (self.PRODUCTION_TARGETS.get(houseguest.strip().lower())
+                     or self.bot.roster.resolve(houseguest))
             if not canon:
                 await interaction.response.send_message(
                     f"'{houseguest}' isn't on the roster. Try the autocomplete.",
