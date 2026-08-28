@@ -379,6 +379,54 @@ _ZING_MEMBER_SYSTEM = (
 # Same anti-formula treatment for houseguests: without a steer, every zing
 # becomes "here are the tracked facts about this person, strung together".
 
+_PRODUCTION_ZING_SYSTEM = (
+    "You are Zingbot 3000, roasting the people who MAKE Big Brother — the "
+    "producers, the network, the show's habits. Write ONE zing (1-2 "
+    "sentences).\n"
+    "AUDIENCE: adult live-feed obsessives with twenty-plus years of grievances. "
+    "They know the show's whole history and are on your side — be funny about "
+    "the show, never sneering at them for watching it.\n"
+    + _ZING_CRAFT + _ZING_HEAT +
+    "MATERIAL — the entire history is fair game, not just this week: decades of "
+    "rigged-feeling twists and comps that reward the wrong people; production "
+    "interference and obvious favouritism; casting the same archetypes forever; "
+    "diary-room leading; the recycled themes; punishments dressed up as "
+    "content; feeds cut whenever anything interesting happens; the audience "
+    "being sold a subscription and then managed; returning players; the "
+    "'biggest twist ever' that never is; how the edit tells a different story "
+    "than the feeds. Reach for something SPECIFIC from the show's history "
+    "rather than a generic complaint.\n"
+    "Do NOT default to whatever is happening this week — a zing that is only "
+    "about the current twist is the shallowest available joke, and you have "
+    "years of material.\n"
+    "OFF LIMITS: anything about a real person's appearance, body, family, "
+    "private life, health, or any protected characteristic. Roast their "
+    "PROFESSIONAL DECISIONS and the show, never the human. No threats, no "
+    "wishing harm.\n"
+    "Do NOT add a sign-off; that gets appended. Output the zing only."
+)
+
+
+# The show's history, so /zing grodner isn't chained to this week's twist.
+PRODUCTION_ZING_ANGLES = [
+    "comps that reward reaction time over anything resembling strategy",
+    "how reliably the interesting player goes home before jury",
+    "casting the same five archetypes every single season",
+    "the diary room asking a question until it gets the answer it wants",
+    "twists that exist to rescue a season the edit already ruined",
+    "returning players taking a spot from someone new",
+    "how the episode edit and the live feeds describe different events",
+    "punishments invented to fill airtime, sold as gameplay",
+    "the feeds cutting the instant something worth watching starts",
+    "a format that has barely changed in two decades still being called fresh",
+    "america's-vote twists that are decided by whoever the edit likes",
+    "the gap between how the show talks about itself and what it airs",
+    "production leaning on the house to protect a story it prefers",
+    "themed weeks that cost more than the prize they distract from",
+    "endgame comps designed so the best player can still be removed",
+]
+
+
 _PRODUCTION_ROAST_SYSTEM = (
     "You are Zingbot 3000, and the feeds are OFF. Production has pulled the "
     "live feeds and left the fans with nothing. Write ONE short post (1-3 "
@@ -518,13 +566,20 @@ class ZingCog(commands.Cog):
             return self._next_line(name)
         who = self.PRODUCTION_TARGETS.get(name.strip().lower())
         if who:
-            twist = await self.bot.db.kv_get("twist_note") or ""
-            context = (f"Roast {who}, the people who make this show. "
-                       + (f"Current twist: {twist}" if twist else
-                          "General grievances about how the show is produced."))
-            text = await production_roast(
-                llm, context, random.choice(PRODUCTION_ROAST_ANGLES))
-            if text:
+            # Deliberately NO twist note here. Handing it over made every
+            # Grodner zing a joke about this week's blackout; the show has
+            # twenty-plus years of material and the angle list covers it.
+            angle = random.choice(PRODUCTION_ZING_ANGLES)
+            try:
+                text = await llm.text(
+                    _PRODUCTION_ZING_SYSTEM,
+                    f"Zing {who} — the producers of Big Brother.\n"
+                    f"ANGLE for this one — build the whole joke on this and "
+                    f"nothing else: {angle}",
+                    max_tokens=400)
+            except Exception:
+                text = None
+            if text and not _looks_truncated(text):
                 return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
             return self._next_line(who)
         try:
