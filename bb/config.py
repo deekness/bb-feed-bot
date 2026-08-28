@@ -63,6 +63,11 @@ class Season:
     episode_air_windows: dict = field(default_factory=dict)
     feeds_back_min_minutes: int = 20      # suppress 'feeds are back' below this
     feeds_back_ping_minutes: int = 75     # @here only for outages this long
+    kalshi_event_ticker: str = ""         # winner market to watch for leaks
+    market_min_drop: int = 8              # cents/points of drop to care about
+    market_min_volume: int = 100          # contracts traded alongside the drop
+    market_min_price: int = 6             # ignore players already priced out
+    blackout_roast_hours: int = 6         # how often to roast a long blackout
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -116,6 +121,11 @@ class Season:
             episode_air_windows=dict(data.get("episode_air_windows") or {}),
             feeds_back_min_minutes=int(data.get("feeds_back_min_minutes", 20)),
             feeds_back_ping_minutes=int(data.get("feeds_back_ping_minutes", 75)),
+            kalshi_event_ticker=str(data.get("kalshi_event_ticker", "") or ""),
+            market_min_drop=int(data.get("market_min_drop", 8)),
+            market_min_volume=int(data.get("market_min_volume", 100)),
+            market_min_price=int(data.get("market_min_price", 6)),
+            blackout_roast_hours=int(data.get("blackout_roast_hours", 6)),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
