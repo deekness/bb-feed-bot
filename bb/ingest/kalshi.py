@@ -25,6 +25,23 @@ _BASE = "https://api.elections.kalshi.com/trade-api/v2/markets"
 _UA = "ChenBot/1.0 (Big Brother Discord bot)"
 
 
+
+def _cents(value) -> int | None:
+    """'0.1900' -> 19. Kalshi quotes dollars as strings; a price in cents is
+    the implied probability, which is what the alerts reason about."""
+    try:
+        return int(round(float(value) * 100))
+    except (TypeError, ValueError):
+        return None
+
+
+def _int(value) -> int | None:
+    try:
+        return int(float(value))
+    except (TypeError, ValueError):
+        return None
+
+
 class KalshiWatcher:
     def __init__(self, event_ticker: str, roster=None, timeout: int = 20):
         self.event_ticker = event_ticker
@@ -38,24 +55,44 @@ class KalshiWatcher:
         Prices are cents and map directly to implied probability, so a move
         from 24 to 11 is a 13-point drop in their chance of winning.
         """
-        params = {"event_ticker": self.event_ticker, "status": "open", "limit": "200"}
-        try:
-            async with aiohttp.ClientSession(headers={"User-Agent": _UA}) as sess:
-                async with sess.get(_BASE, params=params, timeout=self.timeout) as resp:
-                    if resp.status != 200:
-                        self.consecutive_failures += 1
-                        log.warning("kalshi HTTP %s", resp.status)
-                        return None
-                    data = await resp.json()
-        except Exception as e:
-            self.consecutive_failures += 1
-            log.warning("kalshi fetch failed: %s", e)
-            return None
+        # Try with the status filter first, then without: if the event's markets
+        # aren't in the state we asked for, the API happily returns an empty
+        # list with a 200, which used to look exactly like "working, nothing to
+        # report".
+        attempts = [
+            {"event_ticker": self.event_ticker, "status": "open", "limit": "200"},
+            {"event_ticker": self.event_ticker, "limit": "200"},
+        ]
+        markets = None
+        for params in attempts:
+            try:
+                async with aiohttp.ClientSession(headers={"User-Agent": _UA}) as sess:
+                    async with sess.get(_BASE, params=params,
+                                        timeout=self.timeout) as resp:
+                        if resp.status != 200:
+                            self.consecutive_failures += 1
+                            log.warning("kalshi HTTP %s (params=%s)",
+                                        resp.status, params)
+                            return None
+                        data = await resp.json()
+            except Exception as e:
+                self.consecutive_failures += 1
+                log.warning("kalshi fetch failed: %s", e)
+                return None
+            got = data.get("markets")
+            if not isinstance(got, list):
+                log.warning("kalshi: unexpected payload shape — keys=%s",
+                            list(data)[:8])
+                return None
+            if got:
+                markets = got
+                break
         self.consecutive_failures = 0
 
-        markets = data.get("markets")
-        if not isinstance(markets, list):
-            log.warning("kalshi: unexpected payload shape")
+        if not markets:
+            # Silence here is what wasted a deploy cycle. Say so.
+            log.warning("kalshi: 0 markets returned for event %r — the event "
+                        "ticker is probably wrong", self.event_ticker)
             return None
 
         out: dict[str, dict] = {}
@@ -65,19 +102,31 @@ class KalshiWatcher:
             who = self._houseguest(m)
             if not who:
                 continue
-            price = m.get("last_price")
+            # Kalshi returns DOLLAR STRINGS ("0.1900") in *_dollars fields and
+            # volumes in *_fp fields. The older integer-cent names are kept as
+            # a fallback in case the shape changes back.
+            price = _cents(m.get("last_price_dollars"))
             if price is None:
-                price = m.get("yes_bid")
-            try:
-                price = int(price)
-            except (TypeError, ValueError):
+                price = _cents(m.get("yes_bid_dollars"))
+            if price is None:
+                price = _int(m.get("last_price"))
+            if price is None:
                 continue
             out[who] = {
                 "ticker": str(m.get("ticker", "")),
                 "price": price,
-                "volume": int(m.get("volume") or 0),
-                "volume_24h": int(m.get("volume_24h") or 0),
+                "volume": _int(m.get("volume_fp")) or _int(m.get("volume")) or 0,
+                "volume_24h": (_int(m.get("volume_24h_fp"))
+                               or _int(m.get("volume_24h")) or 0),
             }
+        if not out:
+            sample = [
+                {k: m.get(k) for k in ("ticker", "yes_sub_title", "title")}
+                for m in markets[:3]
+            ]
+            log.warning("kalshi: %d markets but none matched the roster — "
+                        "sample=%s", len(markets), sample)
+            return None
         return out or None
 
     def _houseguest(self, market: dict) -> str | None:
