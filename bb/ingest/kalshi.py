@@ -42,6 +42,44 @@ def _int(value) -> int | None:
         return None
 
 
+_EVENTS = "https://api.elections.kalshi.com/trade-api/v2/events"
+
+
+async def find_event(title_contains: str, timeout: int = 20) -> str | None:
+    """Find an event ticker by title, e.g. 'Week 8 elimination'.
+
+    Weekly markets get a new ticker every week, so hard-coding one means
+    editing config every Thursday. The titles are consistent
+    ("Big Brother Season 28 · Week 8 elimination"), so search on that instead.
+    """
+    wanted = title_contains.lower()
+    params = {"status": "open", "limit": "200"}
+    try:
+        async with aiohttp.ClientSession(headers={"User-Agent": _UA}) as sess:
+            async with sess.get(_EVENTS, params=params, timeout=timeout) as resp:
+                if resp.status != 200:
+                    log.warning("kalshi events HTTP %s", resp.status)
+                    return None
+                data = await resp.json()
+    except Exception as e:
+        log.warning("kalshi event search failed: %s", e)
+        return None
+    events = data.get("events")
+    if not isinstance(events, list):
+        log.warning("kalshi events: unexpected shape — keys=%s", list(data)[:8])
+        return None
+    for ev in events:
+        title = str(ev.get("title", ""))
+        if wanted in title.lower():
+            log.info("kalshi: matched %r -> %s", title, ev.get("event_ticker"))
+            return str(ev.get("event_ticker"))
+    bb = [e.get("title") for e in events
+          if "big brother" in str(e.get("title", "")).lower()][:5]
+    log.warning("kalshi: no event matching %r (Big Brother events seen: %s)",
+                title_contains, bb or "none")
+    return None
+
+
 class KalshiWatcher:
     def __init__(self, event_ticker: str, roster=None, timeout: int = 20):
         self.event_ticker = event_ticker
