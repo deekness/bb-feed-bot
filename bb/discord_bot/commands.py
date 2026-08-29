@@ -1022,7 +1022,12 @@ class BBCommands(commands.Cog):
             return
 
         prev = await self.bot.db.kv_get("kalshi_prices") or {}
-        rows = sorted(cur.items(), key=lambda kv: -kv[1]["price"])
+        # Kalshi keeps settled markets listed at 1%, so half the board is
+        # people who left weeks ago. Show the house that's still playing.
+        gone = {r["houseguest"] for r in await self.bot.db.fetch(
+            "SELECT houseguest FROM game_state WHERE role = 'evicted'")}
+        live = {hg: d for hg, d in cur.items() if hg not in gone}
+        rows = sorted((live or cur).items(), key=lambda kv: -kv[1]["price"])
         lines = []
         for hg, d in rows:
             was = prev.get(hg, {}).get("price")
@@ -1035,9 +1040,11 @@ class BBCommands(commands.Cog):
             title="📈 Winner market",
             description="\n".join(lines) or "No houseguest markets found.",
             color=0x1ABC9C, timestamp=discord.utils.utcnow())
+        out = len(cur) - len(rows)
         embed.set_footer(
-            text=f"{len(rows)} markets · polled every 10 min · alerts on a sharp "
-                 f"drop with real volume behind it")
+            text=f"{len(rows)} still in"
+                 + (f" · {out} evicted hidden" if out > 0 else "")
+                 + " · polled every 10 min · alerts on a sharp drop with volume")
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="status", description="(Admin) Show bot status.")
