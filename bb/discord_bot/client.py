@@ -30,7 +30,7 @@ from ..analysis.summarize import (Summarizer, event_category, sentence_clamp,
 from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
-from ..ingest.kalshi import KalshiWatcher, detect_moves
+from ..ingest.kalshi import KalshiWatcher, detect_moves, find_event
 from .zings import PRODUCTION_ROAST_ANGLES, production_roast
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
                                 FeedStateMonitor, duration_in,
@@ -141,11 +141,14 @@ class BBBot(commands.Bot):
                       "ticker": season.kalshi_event_ticker, "watch": "drop"}]
         self.markets = [
             {"label": str(m.get("label") or m.get("ticker")),
+             "label_template": str(m.get("label") or ""),
+             "title_contains": m.get("title_contains"),
              "watch": ("rise" if str(m.get("watch", "drop")).lower() == "rise"
                        else "drop"),
-             "key": str(m.get("ticker")),
-             "watcher": KalshiWatcher(str(m.get("ticker")), roster=self.roster)}
-            for m in specs if m.get("ticker")
+             "key": str(m.get("ticker") or m.get("title_contains")),
+             "watcher": (KalshiWatcher(str(m.get("ticker")), roster=self.roster)
+                         if m.get("ticker") else None)}
+            for m in specs if m.get("ticker") or m.get("title_contains")
         ]
         self.kalshi = self.markets[0]["watcher"] if self.markets else None
 
@@ -576,6 +579,22 @@ class BBBot(commands.Bot):
                 log.error("market %s failed: %s", spec["label"], e)
 
     async def _poll_one_market(self, spec: dict) -> None:
+        # A weekly market's ticker changes every week, so specs can name the
+        # title pattern instead and be re-resolved as the weeks turn.
+        pattern = spec.get("title_contains")
+        if pattern:
+            week = self.game_state.current_week()
+            wanted = pattern.replace("{week}", str(week))
+            if spec.get("resolved_for") != wanted:
+                ticker = await find_event(wanted)
+                if not ticker:
+                    return
+                spec["key"] = ticker
+                spec["label"] = spec.get("label_template", spec["label"]).replace(
+                    "{week}", str(week))
+                spec["watcher"] = KalshiWatcher(ticker, roster=self.roster)
+                spec["resolved_for"] = wanted
+                log.info("market %s resolved to %s", spec["label"], ticker)
         cur = await spec["watcher"].fetch()
         if not cur:
             return
@@ -661,7 +680,7 @@ class BBBot(commands.Bot):
         log.info("market alert [%s]: %s %s->%s on %s traded", spec["label"],
                  top["houseguest"], top["from"], top["to"], top["traded"])
 
-    @tasks.loop(minutes=30)
+    @tasks.loop(minutes=15)
     async def feeds_down_loop(self) -> None:
         """While the feeds are dark, keep the channel alive with a roast."""
         try:
@@ -672,6 +691,23 @@ class BBBot(commands.Bot):
     @feeds_down_loop.before_loop
     async def _before_feeds_down(self) -> None:
         await self.wait_until_ready()
+
+    async def _blackout_channels(self) -> list:
+        """Every channel that should get blackout roasts. Configured as a list
+        so it can reach more than one server; falls back to the feeds channel."""
+        ids = list(self.season.blackout_roast_channel_ids or [])
+        out = []
+        for cid in ids:
+            ch = self.get_channel(int(cid))
+            if isinstance(ch, discord.TextChannel):
+                out.append(ch)
+            else:
+                log.warning("blackout roast channel %s not found", cid)
+        if not out:
+            ch = await self.feeds_channel()
+            if ch:
+                out = [ch]
+        return out
 
     async def _maybe_roast_the_blackout(self) -> None:
         if not self._in_season():
@@ -690,6 +726,18 @@ class BBBot(commands.Bot):
         # anything for a planned multi-day shutdown — so the bot sat there
         # believing the feeds were live while nothing arrived for 36 hours.
         # Trust the silence too: no updates for hours IS the feeds being down.
+        # An explicitly recorded blackout start beats inference: during a
+        # planned shutdown the Bluesky accounts keep posting ABOUT the show,
+        # so "time since the last update" reads as a couple of hours when the
+        # cameras have actually been off for days.
+        manual = await self.db.kv_get("blackout_since")
+        if manual:
+            try:
+                down_for = max(down_for, (now - dt.datetime.fromisoformat(
+                    manual)).total_seconds())
+            except (ValueError, TypeError):
+                pass
+
         newest = await self.db.fetchval(
             "SELECT max(published_at) FROM updates WHERE source <> ALL($1)",
             list(self.digest_sources) or [""])
@@ -722,15 +770,23 @@ class BBBot(commands.Bot):
             self.llm, context, random.choice(PRODUCTION_ROAST_ANGLES))
         if not text:
             return
-        channel = await self.feeds_channel()
-        if not channel:
+        channels = await self._blackout_channels()
+        if not channels:
             return
         await self.db.kv_set("blackout_roast_at",
                              dt.datetime.now(dt.timezone.utc).isoformat())
-        await channel.send(embed=discord.Embed(
-            title=f"📵 Still no feeds — hour {hours}",
-            description=text, color=0x95A5A6,
-            timestamp=dt.datetime.now(self.tz)))
+        embed = discord.Embed(
+            title=f"🪦 Still no feeds — hour {hours}",
+            description=text.strip(),
+            color=0xC0392B, timestamp=dt.datetime.now(self.tz))
+        for ch in channels:
+            try:
+                await ch.send(embed=embed)
+            except Exception as e:
+                log.warning("blackout roast to #%s failed: %s",
+                            getattr(ch, "id", "?"), e)
+        log.info("blackout roast posted to %d channel(s) (hour %d)",
+                 len(channels), hours)
         log.info("posted blackout roast (hour %d)", hours)
 
     @tasks.loop(seconds=15)
@@ -754,9 +810,7 @@ class BBBot(commands.Bot):
                                 - dt.datetime.fromisoformat(since)).total_seconds()
                 except (ValueError, TypeError):
                     down_for = 0.0
-            want = (self.FEEDSTATE_POLL_LONG_S
-                    if down_for > self.FEEDSTATE_LONG_DOWN_S
-                    else self.FEEDSTATE_POLL_DOWN_S)
+            want = self.FEEDSTATE_POLL_DOWN_S
         if self.feedstate_loop.seconds != want:
             self.feedstate_loop.change_interval(seconds=want)
             log.info("feed-state polling every %ds (state=%s)", want, state or "unknown")

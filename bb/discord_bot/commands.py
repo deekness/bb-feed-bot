@@ -3,7 +3,7 @@
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
         /gamestate, /ask, /votes, /market, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
-        /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /settwist, /setchannel, /setrecapchannel, /setbreakingchannel, /setbriefingchannel, /setfeedschannel, /status,
+        /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /settwist, /blackout, /setchannel, /setrecapchannel, /setbreakingchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
 Owner:  /sync
 
@@ -12,6 +12,7 @@ separate files and load them in setup_hook.
 """
 from __future__ import annotations
 
+import datetime as dt
 import logging
 from dataclasses import replace
 
@@ -1057,6 +1058,37 @@ class BBCommands(commands.Cog):
             e2.set_footer(text="Kalshi")
             embeds.append(e2)
         await interaction.followup.send(embeds=embeds[:10])
+
+    @app_commands.command(
+        name="blackout",
+        description="(Admin) Record when the feeds actually went down.")
+    @app_commands.describe(
+        since="ISO time the feeds went dark, e.g. 2026-08-27T20:16:34-07:00. "
+              "Omit to clear.")
+    async def blackout(self, interaction: discord.Interaction,
+                       since: str | None = None):
+        if not self.bot.is_admin(interaction):
+            await interaction.response.send_message("Admins only.", ephemeral=True)
+            return
+        if not since:
+            await self.bot.db.kv_set("blackout_since", None)
+            await interaction.response.send_message(
+                "Blackout start cleared — back to inferring it.", ephemeral=True)
+            return
+        try:
+            when = dt.datetime.fromisoformat(since)
+            if when.tzinfo is None:
+                when = when.replace(tzinfo=dt.timezone.utc)
+        except ValueError:
+            await interaction.response.send_message(
+                "Couldn't read that time. Use e.g. `2026-08-27T20:16:34-07:00`.",
+                ephemeral=True)
+            return
+        await self.bot.db.kv_set("blackout_since", when.isoformat())
+        hours = (dt.datetime.now(dt.timezone.utc) - when).total_seconds() / 3600
+        await interaction.response.send_message(
+            f"🪦 Blackout recorded from <t:{int(when.timestamp())}:f> "
+            f"({hours:.0f} hours and counting).", ephemeral=True)
 
     @app_commands.command(name="status", description="(Admin) Show bot status.")
     async def status(self, interaction: discord.Interaction):
