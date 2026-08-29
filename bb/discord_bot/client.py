@@ -887,6 +887,11 @@ class BBBot(commands.Bot):
             allowed_mentions=discord.AllowedMentions(everyone=ping))
         if sig["state"] == STATE_LIVE:
             await self._mark_feeds_back_announced()
+            # The manually recorded blackout start would otherwise keep the
+            # roast loop convinced the feeds are still dark forever.
+            if await self.db.kv_get("blackout_since"):
+                await self.db.kv_set("blackout_since", None)
+                log.info("feeds back — cleared the recorded blackout start")
         log.info("relayed feed-state post: %s%s", sig["state"],
                  " (@here)" if ping else "")
 
