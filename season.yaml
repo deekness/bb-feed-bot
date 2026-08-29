@@ -65,6 +65,19 @@ feeds_back_ping_minutes: 75
 # deliberately high — these markets are thin and a false spoiler is worse than
 # a missed one.
 kalshi_event_ticker: "KXBIGBROTHER-26DEC31"
+
+# Prediction markets to watch. "watch: drop" means a leak looks like a price
+# COLLAPSE (winner market — someone eliminated can no longer win). "watch: rise"
+# means it looks like a SPIKE (weekly eviction market — the question is
+# inverted). Find a ticker in the Kalshi URL for that market.
+markets:
+  - label: "Season 28 Winner"
+    ticker: "KXBIGBROTHER-26DEC31"
+    watch: "drop"
+  # Add the weekly eviction market here once its ticker is known, e.g.
+  # - label: "Week 8 Eviction"
+  #   ticker: "KXBBEVICT-26AUG28"
+  #   watch: "rise"
 market_min_drop: 8
 market_min_volume: 100
 market_min_price: 6
