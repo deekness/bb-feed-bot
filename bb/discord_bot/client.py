@@ -556,6 +556,10 @@ class BBBot(commands.Bot):
         if not cur:
             return
         prev = await self.db.kv_get("kalshi_prices") or {}
+        if not prev:
+            log.info("kalshi: first successful poll — %d markets (%s)", len(cur),
+                     ", ".join(f"{k} {v['price']}%" for k, v in
+                               sorted(cur.items(), key=lambda kv: -kv[1]["price"])[:5]))
         await self.db.kv_set("kalshi_prices", cur)
         if not prev:
             return                      # first run: establish a baseline only

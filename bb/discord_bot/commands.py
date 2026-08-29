@@ -1,7 +1,7 @@
 """Slash commands.
 
 Public: /help, /wtf, /summary, /alliances, /alliance, /relationship,
-        /gamestate, /ask, /votes, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
+        /gamestate, /ask, /votes, /market, /houseguest, /week, /hamsters, /feeds, /episoderecap (+ /zing)
 Admin:  /addhouseguest, /removehouseguest, /addnickname, /confirmalliance,
         /rejectalliance, /namealliance, /setmembers, /applyalliancereport, /resetrelationships, /unlockalliance, /livewrites, /setgamestate, /removegamestate, /settwist, /setchannel, /setrecapchannel, /setbreakingchannel, /setbriefingchannel, /setfeedschannel, /status,
         /testdm
@@ -997,6 +997,48 @@ class BBCommands(commands.Cog):
         await interaction.response.send_message(
             f"🌀 Recorded. Every summary, recap and /ask now knows:\n> {note[:500]}",
             ephemeral=True)
+
+    @app_commands.command(
+        name="market",
+        description="Winner-market odds, and whether the watcher is working.")
+    async def market(self, interaction: discord.Interaction):
+        await interaction.response.defer()
+        watcher = getattr(self.bot, "kalshi", None)
+        if watcher is None:
+            await interaction.followup.send(
+                "No winner market is configured (`kalshi_event_ticker` is unset).")
+            return
+        cur = await watcher.fetch()
+        if not cur:
+            prev = await self.bot.db.kv_get("kalshi_prices") or {}
+            note = ("The market fetch failed just now — check the logs for a "
+                    "`kalshi` line.")
+            if prev:
+                note += ("\nLast known prices (from the most recent successful "
+                         "poll):\n" + "\n".join(
+                             f"- {hg}: {d['price']}%" for hg, d
+                             in sorted(prev.items(), key=lambda kv: -kv[1]["price"])))
+            await interaction.followup.send(note)
+            return
+
+        prev = await self.bot.db.kv_get("kalshi_prices") or {}
+        rows = sorted(cur.items(), key=lambda kv: -kv[1]["price"])
+        lines = []
+        for hg, d in rows:
+            was = prev.get(hg, {}).get("price")
+            move = ""
+            if was is not None and was != d["price"]:
+                delta = d["price"] - was
+                move = f"  ({'+' if delta > 0 else ''}{delta} since last poll)"
+            lines.append(f"**{d['price']}%**  {hg}{move}")
+        embed = discord.Embed(
+            title="📈 Winner market",
+            description="\n".join(lines) or "No houseguest markets found.",
+            color=0x1ABC9C, timestamp=discord.utils.utcnow())
+        embed.set_footer(
+            text=f"{len(rows)} markets · polled every 10 min · alerts on a sharp "
+                 f"drop with real volume behind it")
+        await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="status", description="(Admin) Show bot status.")
     async def status(self, interaction: discord.Interaction):
