@@ -69,7 +69,8 @@ class Season:
     market_min_volume: int = 100          # contracts traded alongside the drop
     market_min_price: int = 6             # ignore players already priced out
     market_lookback_minutes: int = 45   # alert on moves over this span
-    blackout_roast_hours: int = 4         # how often to roast a long blackout
+    blackout_roast_hours: int = 2         # how often to roast a long blackout
+    blackout_roast_channel_ids: list = field(default_factory=list)
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -130,7 +131,9 @@ class Season:
             market_min_price=int(data.get("market_min_price", 6)),
             market_lookback_minutes=int(
                 data.get("market_lookback_minutes", 45)),
-            blackout_roast_hours=int(data.get("blackout_roast_hours", 4)),
+            blackout_roast_hours=int(data.get("blackout_roast_hours", 2)),
+            blackout_roast_channel_ids=list(
+                data.get("blackout_roast_channel_ids") or []),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
