@@ -63,7 +63,8 @@ class Season:
     episode_air_windows: dict = field(default_factory=dict)
     feeds_back_min_minutes: int = 20      # suppress 'feeds are back' below this
     feeds_back_ping_minutes: int = 75     # @here only for outages this long
-    kalshi_event_ticker: str = ""         # winner market to watch for leaks
+    kalshi_event_ticker: str = ""         # legacy single winner market
+    markets: list = field(default_factory=list)  # [{label, ticker, watch}]
     market_min_drop: int = 8              # cents/points of drop to care about
     market_min_volume: int = 100          # contracts traded alongside the drop
     market_min_price: int = 6             # ignore players already priced out
@@ -123,6 +124,7 @@ class Season:
             feeds_back_min_minutes=int(data.get("feeds_back_min_minutes", 20)),
             feeds_back_ping_minutes=int(data.get("feeds_back_ping_minutes", 75)),
             kalshi_event_ticker=str(data.get("kalshi_event_ticker", "") or ""),
+            markets=list(data.get("markets") or []),
             market_min_drop=int(data.get("market_min_drop", 8)),
             market_min_volume=int(data.get("market_min_volume", 100)),
             market_min_price=int(data.get("market_min_price", 6)),
