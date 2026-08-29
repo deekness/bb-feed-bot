@@ -27,12 +27,16 @@ NOTE: random-target mode needs the Server Members privileged intent.
 """
 from __future__ import annotations
 
+import logging
 import random
+import re
 from typing import Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
+
+log = logging.getLogger("bb.zings")
 
 # Each roast gets one of these appended, Zingbot-style.
 ZING_SIGNOFFS = [
@@ -416,10 +420,10 @@ _PRODUCTION_ZING_SYSTEM = (
     "'creative vision', no 'performance review', no 'the format', no words you "
     "would find in a review. Plain, spoken, contemptuous. Short words hurt "
     "more than clever ones.\n"
-    "BANNED CONSTRUCTIONS: 'the same X since <year>' (used to death), and any "
-    "guessed statistic. FACTS you may rely on: the show premiered in 2000 and "
-    "this is season 28. Do not invent other numbers — a wrong specific is worse "
-    "than no specific to this audience.\n"
+    "NO NUMBERS. Do not state how many years, seasons or decades anything has "
+    "run — you get them wrong and this audience knows the real ones. Say "
+    "'every season', 'for as long as anyone can remember', 'since before you "
+    "had a job'. Banned construction: 'the same X since <year>'.\n"
     "MATERIAL — the entire history is fair game, not just this week: decades of "
     "rigged-feeling twists and comps that reward the wrong people; production "
     "interference and obvious favouritism; casting the same archetypes forever; "
@@ -517,6 +521,29 @@ PRODUCTION_ROAST_ANGLES = [
 ]
 
 
+# Rules the model keeps ignoring once the prompt gets long. Asking nicely has a
+# ceiling; this checks the draft and regenerates once if it trips a rule.
+_BANNED_PATTERNS = [
+    (re.compile(r"that'?s not\s+\w[^,]{0,40},\s*that'?s\b", re.I), "house formula"),
+    (re.compile(r"^\s*\w[\w\s.']{0,24}\b(calls?|says?)\s+(it|every|this)\b", re.I),
+     "'X calls it' opener"),
+    (re.compile(r"\b(hostage|captor|kidnap|shank|shiv|hate crime|assault|murder|"
+                r"custody battle|divorce|overdose|funeral)\w*\b", re.I),
+     "crime/violence framing"),
+    # invented arithmetic: the show premiered in 2000, so any other span is wrong
+    (re.compile(r"\b(twenty-?(one|two|three|four|five|seven|eight|nine)|"
+                r"thirty|1[5-9]|2[0-9]|3[0-9])\s+years\b", re.I), "invented year count"),
+]
+
+
+def _rule_break(text: str) -> str | None:
+    """Which ban a draft trips, or None. Cheap insurance against a long prompt."""
+    for pattern, label in _BANNED_PATTERNS:
+        if pattern.search(text or ""):
+            return label
+    return None
+
+
 def _looks_truncated(text: str) -> bool:
     """A zing cut off mid-sentence — the model hit the token ceiling. Appending
     'ZING!' to a fragment reads like a bug, because it is one."""
@@ -603,15 +630,26 @@ class ZingCog(commands.Cog):
             # Grodner zing a joke about this week's blackout; the show has
             # twenty-plus years of material and the angle list covers it.
             angle = random.choice(PRODUCTION_ZING_ANGLES)
-            try:
-                text = await llm.text(
-                    _PRODUCTION_ZING_SYSTEM,
-                    f"Zing {who} — the producers of Big Brother.\n"
-                    f"ANGLE for this one — build the whole joke on this and "
-                    f"nothing else: {angle}",
-                    max_tokens=400)
-            except Exception:
-                text = None
+            prompt = (f"Zing {who} — the producers of Big Brother.\n"
+                      f"ANGLE for this one — build the whole joke on this and "
+                      f"nothing else: {angle}")
+            text = None
+            for attempt in range(2):
+                try:
+                    draft = await llm.text(_PRODUCTION_ZING_SYSTEM, prompt,
+                                           max_tokens=400)
+                except Exception:
+                    break
+                if not draft or _looks_truncated(draft):
+                    break
+                broke = _rule_break(draft)
+                if not broke:
+                    text = draft
+                    break
+                log.info("zing tripped %s — regenerating", broke)
+                prompt = (f"{prompt}\n\nYour last attempt broke a rule "
+                          f"({broke}) and was thrown away. Write a different "
+                          f"joke that does not.")
             if text and not _looks_truncated(text):
                 return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
             return self._next_line(who)
@@ -622,7 +660,18 @@ class ZingCog(commands.Cog):
                    f"Zing this houseguest: {name}\n" \
                    f"ANGLE for this one — build the joke on this and nothing " \
                    f"else, ignore the rest of the house state: {angle}"
-            text = await llm.text(_ZING_SYSTEM, user, max_tokens=400)
+            text = None
+            for _ in range(2):
+                draft = await llm.text(_ZING_SYSTEM, user, max_tokens=400)
+                if not draft or _looks_truncated(draft):
+                    break
+                broke = _rule_break(draft)
+                if not broke:
+                    text = draft
+                    break
+                log.info("zing tripped %s — regenerating", broke)
+                user = (f"{user}\n\nYour last attempt broke a rule ({broke}) "
+                        f"and was thrown away. Write a different joke.")
         except Exception:
             text = None
         if not text:
@@ -642,11 +691,21 @@ class ZingCog(commands.Cog):
             return self._next_line(display_name)
         try:
             angle = random.choice(_MEMBER_ANGLES)
-            text = await llm.text(
-                _ZING_MEMBER_SYSTEM,
-                f"Zing this Discord member: {display_name}\n"
-                f"ANGLE for this one — build the joke on this and nothing else: {angle}",
-                max_tokens=400)
+            prompt = (f"Zing this Discord member: {display_name}\n"
+                      f"ANGLE for this one — build the joke on this and nothing "
+                      f"else: {angle}")
+            text = None
+            for _ in range(2):
+                draft = await llm.text(_ZING_MEMBER_SYSTEM, prompt, max_tokens=400)
+                if not draft or _looks_truncated(draft):
+                    break
+                broke = _rule_break(draft)
+                if not broke:
+                    text = draft
+                    break
+                log.info("zing tripped %s — regenerating", broke)
+                prompt = (f"{prompt}\n\nYour last attempt broke a rule "
+                          f"({broke}) and was thrown away. Write a different joke.")
         except Exception:
             text = None
         if not text or _looks_truncated(text):
