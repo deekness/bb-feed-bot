@@ -649,16 +649,30 @@ class BBBot(commands.Bot):
     async def _maybe_roast_the_blackout(self) -> None:
         if not self._in_season():
             return
+        now = dt.datetime.now(dt.timezone.utc)
+        down_for = 0.0
+
         fs = await self.db.kv_get("feed_state") or {}
-        if not isinstance(fs, dict) or fs.get("state") == STATE_LIVE:
-            return
-        since = fs.get("since")
-        if not since:
-            return
-        try:
-            down_for = (dt.datetime.now(dt.timezone.utc)
-                        - dt.datetime.fromisoformat(since)).total_seconds()
-        except (ValueError, TypeError):
+        if isinstance(fs, dict) and fs.get("state") != STATE_LIVE and fs.get("since"):
+            try:
+                down_for = (now - dt.datetime.fromisoformat(fs["since"])).total_seconds()
+            except (ValueError, TypeError):
+                down_for = 0.0
+
+        # The feed-state account marks ordinary WBRB breaks, but it did not post
+        # anything for a planned multi-day shutdown — so the bot sat there
+        # believing the feeds were live while nothing arrived for 36 hours.
+        # Trust the silence too: no updates for hours IS the feeds being down.
+        newest = await self.db.fetchval(
+            "SELECT max(published_at) FROM updates WHERE source <> ALL($1)",
+            list(self.digest_sources) or [""])
+        if newest is not None:
+            if newest.tzinfo is None:
+                newest = newest.replace(tzinfo=dt.timezone.utc)
+            quiet_for = (now - newest).total_seconds()
+            down_for = max(down_for, quiet_for)
+
+        if not down_for:
             return
         # Comps and ceremonies take the feeds for an hour or two and nobody
         # needs a joke about it. This is for the long, deliberate blackouts.
