@@ -30,7 +30,7 @@ from ..analysis.summarize import (Summarizer, event_category, sentence_clamp,
 from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
-from ..ingest.kalshi import KalshiWatcher, detect_drops
+from ..ingest.kalshi import KalshiWatcher, detect_moves
 from .zings import PRODUCTION_ROAST_ANGLES, production_roast
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
                                 FeedStateMonitor, duration_in,
@@ -132,8 +132,23 @@ class BBBot(commands.Bot):
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
         # Winner-market watcher: during a blackout a leaked result shows up as
         # a price collapse before it shows up anywhere readable.
-        self.kalshi = (KalshiWatcher(season.kalshi_event_ticker, roster=self.roster)
-                       if season.kalshi_event_ticker else None)
+        # One watcher per configured market. Each carries its own label and
+        # the direction a leak moves it: a winner market collapses, a weekly
+        # eviction market spikes.
+        specs = list(season.markets)
+        if not specs and season.kalshi_event_ticker:
+            specs = [{"label": "Season 28 Winner",
+                      "ticker": season.kalshi_event_ticker, "watch": "drop"}]
+        self.markets = [
+            {"label": str(m.get("label") or m.get("ticker")),
+             "watch": ("rise" if str(m.get("watch", "drop")).lower() == "rise"
+                       else "drop"),
+             "key": str(m.get("ticker")),
+             "watcher": KalshiWatcher(str(m.get("ticker")), roster=self.roster)}
+            for m in specs if m.get("ticker")
+        ]
+        self.kalshi = self.markets[0]["watcher"] if self.markets else None
+
         self.pipeline = IngestPipeline(self.db, sources)
         self.extractor = Extractor(self.llm, self.roster)
         self.summarizer = Summarizer(self.llm, self.house_tz, self.roster,
@@ -193,9 +208,11 @@ class BBBot(commands.Bot):
         if self.season.feedstate_enabled:
             self.feedstate_loop.start()
             self.feeds_down_loop.start()
-            if self.kalshi is not None:
+            if self.markets:
                 self.market_loop.start()
-                log.info("watching winner market %s", self.season.kalshi_event_ticker)
+                for m in self.markets:
+                    log.info("watching market %s (%s, alert on %s)",
+                             m["label"], m["key"], m["watch"])
 
     async def on_ready(self) -> None:
         log.info("Logged in as %s (%d guilds)", self.user, len(self.guilds))
@@ -550,30 +567,37 @@ class BBBot(commands.Bot):
         await self.wait_until_ready()
 
     async def _poll_market(self) -> None:
-        if self.kalshi is None or not self._in_season():
+        if not getattr(self, "markets", None) or not self._in_season():
             return
-        cur = await self.kalshi.fetch()
+        for spec in self.markets:
+            try:
+                await self._poll_one_market(spec)
+            except Exception as e:
+                log.error("market %s failed: %s", spec["label"], e)
+
+    async def _poll_one_market(self, spec: dict) -> None:
+        cur = await spec["watcher"].fetch()
         if not cur:
             return
-        prev = await self.db.kv_get("kalshi_prices") or {}
+        prev = await self.db.kv_get(f"kalshi_prices:{spec['key']}") or {}
         if not prev:
-            log.info("kalshi: first successful poll — %d markets (%s)", len(cur),
+            log.info("%s: first successful poll — %d markets (%s)", spec["label"], len(cur),
                      ", ".join(f"{k} {v['price']}%" for k, v in
                                sorted(cur.items(), key=lambda kv: -kv[1]["price"])[:5]))
-        await self.db.kv_set("kalshi_prices", cur)
+        await self.db.kv_set(f"kalshi_prices:{spec['key']}", cur)
 
         # Short history so alerts compare against where the price was a while
         # ago, not just the last tick. At 3-minute polling a slow bleed is
         # invisible tick-to-tick — 15 points over an hour is one point a poll.
         now = dt.datetime.now(dt.timezone.utc)
-        hist = await self.db.kv_get("kalshi_history") or []
+        hist = await self.db.kv_get(f"kalshi_history:{spec['key']}") or []
         hist.append({"at": now.isoformat(),
                      "prices": {k: v["price"] for k, v in cur.items()},
                      "volumes": {k: v["volume"] for k, v in cur.items()}})
         keep_from = now - dt.timedelta(minutes=self.season.market_lookback_minutes + 15)
         hist = [h for h in hist
                 if dt.datetime.fromisoformat(h["at"]) > keep_from][-80:]
-        await self.db.kv_set("kalshi_history", hist)
+        await self.db.kv_set(f"kalshi_history:{spec['key']}", hist)
 
         if not prev:
             return                      # first run: establish a baseline only
@@ -585,14 +609,14 @@ class BBBot(commands.Bot):
             b = older[-1]
             baseline = {k: {"price": p, "volume": b["volumes"].get(k, 0)}
                         for k, p in b["prices"].items()}
-        hits = detect_drops(
-            baseline, cur,
+        hits = detect_moves(
+            baseline, cur, direction=spec["watch"],
             min_drop=self.season.market_min_drop,
             min_volume=self.season.market_min_volume,
             min_price=self.season.market_min_price)
         if not hits:
             return
-        last = await self.db.kv_get("kalshi_alert_at")
+        last = await self.db.kv_get(f"kalshi_alert_at:{spec['key']}")
         if last:
             try:
                 age = (dt.datetime.now(dt.timezone.utc)
@@ -601,7 +625,7 @@ class BBBot(commands.Bot):
                     return              # one alert per swing, not per poll
             except (ValueError, TypeError):
                 pass
-        await self.db.kv_set("kalshi_alert_at",
+        await self.db.kv_set(f"kalshi_alert_at:{spec['key']}",
                              dt.datetime.now(dt.timezone.utc).isoformat())
         top = hits[0]
         # Market moves go to the briefing channel, pinged: a leaked result is
@@ -611,19 +635,22 @@ class BBBot(commands.Bot):
             return
         # Spoilered: this may be a real result nobody has aired yet, so anyone
         # avoiding spoilers shouldn't have it forced into their eye line.
+        rising = spec["watch"] == "rise"
+        moved = "jumped" if rising else "fell"
+        what = ("odds of being evicted" if rising else "odds to win BB28")
         embed = discord.Embed(
-            title="📉 Unusual market movement",
+            title=f"{'📈' if rising else '📉'} Unusual movement — {spec['label']}",
             description=(
-                f"||**{top['houseguest']}**||'s odds to win BB28 just fell from "
+                f"||**{top['houseguest']}**||'s {what} just {moved} from "
                 f"**{top['from']}%** to **{top['to']}%** on {top['traded']:,} "
                 f"contracts traded.\n\n"
-                "Sharp drops on real volume sometimes mean a result has leaked "
-                "to people who trade on it. It can also be nothing — these "
-                "markets are thin."),
+                "A sharp move on real volume sometimes means a result has "
+                "leaked to people who trade on it. It can also be nothing — "
+                "these markets are thin."),
             color=0x9B59B6, timestamp=dt.datetime.now(self.tz))
         if len(hits) > 1:
             embed.add_field(
-                name="Also falling",
+                name="Also moving",
                 value=", ".join(f"||{h['houseguest']}|| {h['from']}→{h['to']}%"
                                 for h in hits[1:4]),
                 inline=False)
@@ -631,7 +658,7 @@ class BBBot(commands.Bot):
         await channel.send(
             content="@here", embed=embed,
             allowed_mentions=discord.AllowedMentions(everyone=True))
-        log.info("market alert: %s %s->%s on %s traded",
+        log.info("market alert [%s]: %s %s->%s on %s traded", spec["label"],
                  top["houseguest"], top["from"], top["to"], top["traded"])
 
     @tasks.loop(minutes=30)

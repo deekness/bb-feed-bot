@@ -1003,14 +1003,16 @@ class BBCommands(commands.Cog):
         description="Winner-market odds, and whether the watcher is working.")
     async def market(self, interaction: discord.Interaction):
         await interaction.response.defer()
-        watcher = getattr(self.bot, "kalshi", None)
-        if watcher is None:
+        specs = getattr(self.bot, "markets", None)
+        if not specs:
             await interaction.followup.send(
                 "No winner market is configured (`kalshi_event_ticker` is unset).")
             return
+        spec = specs[0]
+        watcher = spec["watcher"]
         cur = await watcher.fetch()
         if not cur:
-            prev = await self.bot.db.kv_get("kalshi_prices") or {}
+            prev = await self.bot.db.kv_get(f"kalshi_prices:{spec['key']}") or {}
             note = ("The market fetch failed just now — check the logs for a "
                     "`kalshi` line.")
             if prev:
@@ -1021,7 +1023,7 @@ class BBCommands(commands.Cog):
             await interaction.followup.send(note)
             return
 
-        prev = await self.bot.db.kv_get("kalshi_prices") or {}
+        prev = await self.bot.db.kv_get(f"kalshi_prices:{spec['key']}") or {}
         # Kalshi keeps settled markets listed at 1%, so half the board is
         # people who left weeks ago. Show the house that's still playing.
         gone = {r["houseguest"] for r in await self.bot.db.fetch(
@@ -1037,11 +1039,24 @@ class BBCommands(commands.Cog):
                 move = f"  ({'+' if delta > 0 else ''}{delta} since last poll)"
             lines.append(f"**{d['price']}%**  {hg}{move}")
         embed = discord.Embed(
-            title="📈 Winner market",
+            title=f"📈 {spec['label']}",
             description="\n".join(lines) or "No houseguest markets found.",
             color=0x1ABC9C, timestamp=discord.utils.utcnow())
         embed.set_footer(text="Odds to win · Kalshi")
-        await interaction.followup.send(embed=embed)
+        embeds = [embed]
+        for extra in specs[1:]:
+            data = await extra["watcher"].fetch()
+            if not data:
+                continue
+            live2 = {hg: d for hg, d in data.items() if hg not in gone} or data
+            rows2 = sorted(live2.items(), key=lambda kv: -kv[1]["price"])
+            e2 = discord.Embed(
+                title=f"{'📈' if extra['watch'] == 'rise' else '📉'} {extra['label']}",
+                description="\n".join(f"**{d['price']}%**  {hg}" for hg, d in rows2),
+                color=0x1ABC9C, timestamp=discord.utils.utcnow())
+            e2.set_footer(text="Kalshi")
+            embeds.append(e2)
+        await interaction.followup.send(embeds=embeds[:10])
 
     @app_commands.command(name="status", description="(Admin) Show bot status.")
     async def status(self, interaction: discord.Interaction):
