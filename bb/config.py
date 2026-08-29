@@ -70,6 +70,7 @@ class Season:
     market_min_price: int = 6             # ignore players already priced out
     market_lookback_minutes: int = 45   # alert on moves over this span
     blackout_roast_hours: int = 2         # how often to roast a long blackout
+    show_time_capsule: bool = False      # the twist ran six weeks and is done
     blackout_roast_channel_ids: list = field(default_factory=list)
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
@@ -132,6 +133,7 @@ class Season:
             market_lookback_minutes=int(
                 data.get("market_lookback_minutes", 45)),
             blackout_roast_hours=int(data.get("blackout_roast_hours", 2)),
+            show_time_capsule=bool(data.get("show_time_capsule", False)),
             blackout_roast_channel_ids=list(
                 data.get("blackout_roast_channel_ids") or []),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
