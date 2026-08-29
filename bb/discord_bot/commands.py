@@ -217,9 +217,19 @@ class BBCommands(commands.Cog):
             await interaction.followup.send(embed=embed)
             return
 
+        gone_rows = await self.bot.db.fetch(
+            "SELECT houseguest FROM game_state WHERE role = 'evicted' "
+            "ORDER BY week, set_at")
+        names_gone = {r["houseguest"] for r in gone_rows}
+
         lines = []
         if state.get("hoh"):
             lines.append(f"👑 **HOH**  {', '.join(state['hoh'])}")
+        # Two evictions land in one week when a twist compresses things, so
+        # last cycle's nominees are still on file. Someone who has left the
+        # house is not on the block.
+        state = {role: [n for n in names if n not in names_gone]
+                 for role, names in state.items()} if names_gone else state
         if state.get("nominee"):
             saved = set(state.get("veto_used_on", []))
             # Saved noms go to the END, struck through — at a glance the line
@@ -246,42 +256,42 @@ class BBCommands(commands.Cog):
         # weeks — so show every holder, not just this week's. POWERS persist
         # until used, so they stay present tense; PUNISHMENTS expire with their
         # week, so past ones read "had".
-        cap = await self.bot.db.fetch(
-            "SELECT week, role, houseguest, detail, expires_week FROM game_state "
-            "WHERE role LIKE 'time_capsule%' ORDER BY week, set_at")
-        if cap:
-            outcome, chosen = {}, {}
-            for r in cap:
-                if r["role"] == "time_capsule":
-                    chosen.setdefault(r["houseguest"], r["week"])
-                else:
-                    outcome[r["houseguest"]] = (
-                        r["role"], r["week"], (r["detail"] or "").strip(),
-                        r["expires_week"])
-            bits = []
-            for hg, (role, wk, detail, expires) in outcome.items():
-                what = f" ({detail})" if detail else ""
-                if role == "time_capsule_power":
-                    # Powers last until used — but some carry a shelf life, and
-                    # an expired power is worth showing as spent, not live.
-                    if expires and week > expires:
-                        bits.append(f"{hg} — had a power{what}, expired")
-                    elif expires:
-                        left = expires - week
-                        when = ("expires this week" if left <= 0
-                                else f"expires week {expires}")
-                        bits.append(f"{hg} — has a power{what}, {when}")
+        if self.bot.season.show_time_capsule:
+            cap = await self.bot.db.fetch(
+                "SELECT week, role, houseguest, detail, expires_week FROM game_state "
+                "WHERE role LIKE 'time_capsule%' ORDER BY week, set_at")
+            if cap:
+                outcome, chosen = {}, {}
+                for r in cap:
+                    if r["role"] == "time_capsule":
+                        chosen.setdefault(r["houseguest"], r["week"])
                     else:
-                        bits.append(f"{hg} — has a power{what}")
-                elif wk < week:
-                    bits.append(f"{hg} — had a punishment{what}")
-                else:
-                    bits.append(f"{hg} — has a punishment{what}")
-            for hg, wk in chosen.items():
-                if hg not in outcome:
-                    bits.append(f"{hg} — outcome TBD")
-            if bits:
-                lines.append("🕰️ **Time Capsule**  " + "; ".join(bits))
+                        outcome[r["houseguest"]] = (
+                            r["role"], r["week"], (r["detail"] or "").strip(),
+                            r["expires_week"])
+                bits = []
+                for hg, (role, wk, detail, expires) in outcome.items():
+                    what = f" ({detail})" if detail else ""
+                    if role == "time_capsule_power":
+                        if expires and week > expires:
+                            bits.append(f"{hg} — had a power{what}, expired")
+                        elif expires:
+                            left = expires - week
+                            when = ("expires this week" if left <= 0
+                                    else f"expires week {expires}")
+                            bits.append(f"{hg} — has a power{what}, {when}")
+                        else:
+                            bits.append(f"{hg} — has a power{what}")
+                    elif wk < week:
+                        bits.append(f"{hg} — had a punishment{what}")
+                    else:
+                        bits.append(f"{hg} — has a punishment{what}")
+                for hg, wk in chosen.items():
+                    if hg not in outcome:
+                        bits.append(f"{hg} — outcome TBD")
+                if bits:
+                    lines.append("🕰️ **Time Capsule**  " + "; ".join(bits))
+
         if state.get("have_not"):
             lines.append(f"🥶 **Have-Nots**  {', '.join(state['have_not'])}")
         # The Block Buster is played on eviction night, so it belongs to the
