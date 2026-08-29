@@ -146,32 +146,43 @@ class KalshiWatcher:
         return None
 
 
-def detect_drops(prev: dict, cur: dict, *, min_drop: int, min_volume: int,
-                 min_price: int) -> list[dict]:
-    """Houseguests whose winner odds fell hard, on real volume.
+def detect_moves(prev: dict, cur: dict, *, direction: str, min_drop: int,
+                 min_volume: int, min_price: int) -> list[dict]:
+    """Houseguests whose odds moved hard in the telling direction, on volume.
 
-    Both conditions matter. A price fall alone is noise in a thin market; new
-    volume alone is someone taking a position. Together they are what a leak
-    looks like from the outside.
+    The direction depends on what the market is asking. On a WINNER market a
+    leak looks like a collapse — someone who is gone stops being able to win.
+    On a WEEKLY EVICTION market the same leak looks like a spike, because the
+    question is inverted. Both conditions still matter: a price move alone is
+    noise in a thin market, new volume alone is someone taking a position.
     """
     hits = []
     for name, now in cur.items():
         was = prev.get(name)
         if not was:
             continue
-        drop = int(was.get("price", 0)) - int(now.get("price", 0))
+        before, after = int(was.get("price", 0)), int(now.get("price", 0))
+        drop = (before - after) if direction == "drop" else (after - before)
         traded = int(now.get("volume", 0)) - int(was.get("volume", 0))
-        # Ignore players already priced as no-hopers: a 3c market falling to 1c
-        # is not news, it is rounding.
-        if int(was.get("price", 0)) < min_price:
+        # On a winner market, ignore players already priced as no-hopers: 3c
+        # falling to 1c is rounding, not news. On an eviction market the
+        # interesting moves START from a low price, so only floor the side the
+        # move is coming FROM.
+        floor_price = before if direction == "drop" else after
+        if floor_price < min_price:
             continue
         if drop >= min_drop and traded >= min_volume:
             hits.append({
                 "houseguest": name,
-                "from": int(was["price"]),
-                "to": int(now["price"]),
+                "from": before,
+                "to": after,
                 "drop": drop,
                 "traded": traded,
             })
     hits.sort(key=lambda h: h["drop"], reverse=True)
     return hits
+
+
+def detect_drops(prev: dict, cur: dict, **kw) -> list[dict]:
+    """Backwards-compatible wrapper: winner-market semantics."""
+    return detect_moves(prev, cur, direction="drop", **kw)
