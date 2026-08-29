@@ -70,7 +70,7 @@ market_min_volume: 100
 market_min_price: 6
 
 # How often to roast production while the feeds are dark (hours).
-blackout_roast_hours: 6
+blackout_roast_hours: 4
 
 # Tried in order if the primary refuses the connection. The rss.* host has been
 # seen to drop TCP connections from Railway while the site itself is up.
