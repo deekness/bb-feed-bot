@@ -1040,11 +1040,7 @@ class BBCommands(commands.Cog):
             title="📈 Winner market",
             description="\n".join(lines) or "No houseguest markets found.",
             color=0x1ABC9C, timestamp=discord.utils.utcnow())
-        out = len(cur) - len(rows)
-        embed.set_footer(
-            text=f"{len(rows)} still in"
-                 + (f" · {out} evicted hidden" if out > 0 else "")
-                 + " · polled every 10 min · alerts on a sharp drop with volume")
+        embed.set_footer(text="Odds to win · Kalshi")
         await interaction.followup.send(embed=embed)
 
     @app_commands.command(name="status", description="(Admin) Show bot status.")

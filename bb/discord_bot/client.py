@@ -537,7 +537,7 @@ class BBBot(commands.Bot):
     FEEDSTATE_LONG_DOWN_S = 2 * 3600
     FEEDSTATE_POLL_LONG_S = 120
 
-    @tasks.loop(minutes=10)
+    @tasks.loop(minutes=3)
     async def market_loop(self) -> None:
         """Watch the winner market for a leak-shaped move."""
         try:
@@ -561,10 +561,32 @@ class BBBot(commands.Bot):
                      ", ".join(f"{k} {v['price']}%" for k, v in
                                sorted(cur.items(), key=lambda kv: -kv[1]["price"])[:5]))
         await self.db.kv_set("kalshi_prices", cur)
+
+        # Short history so alerts compare against where the price was a while
+        # ago, not just the last tick. At 3-minute polling a slow bleed is
+        # invisible tick-to-tick — 15 points over an hour is one point a poll.
+        now = dt.datetime.now(dt.timezone.utc)
+        hist = await self.db.kv_get("kalshi_history") or []
+        hist.append({"at": now.isoformat(),
+                     "prices": {k: v["price"] for k, v in cur.items()},
+                     "volumes": {k: v["volume"] for k, v in cur.items()}})
+        keep_from = now - dt.timedelta(minutes=self.season.market_lookback_minutes + 15)
+        hist = [h for h in hist
+                if dt.datetime.fromisoformat(h["at"]) > keep_from][-80:]
+        await self.db.kv_set("kalshi_history", hist)
+
         if not prev:
             return                      # first run: establish a baseline only
+        window_start = now - dt.timedelta(minutes=self.season.market_lookback_minutes)
+        older = [h for h in hist
+                 if dt.datetime.fromisoformat(h["at"]) <= window_start]
+        baseline = prev
+        if older:
+            b = older[-1]
+            baseline = {k: {"price": p, "volume": b["volumes"].get(k, 0)}
+                        for k, p in b["prices"].items()}
         hits = detect_drops(
-            prev, cur,
+            baseline, cur,
             min_drop=self.season.market_min_drop,
             min_volume=self.season.market_min_volume,
             min_price=self.season.market_min_price)
