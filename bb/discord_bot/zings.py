@@ -416,6 +416,14 @@ _PRODUCTION_ZING_SYSTEM = (
     "side, and nothing here needs softening for them. Write like you are in the "
     "room with them, not filing copy.\n"
     + _ZING_CRAFT + _ZING_HEAT +
+    "SAVAGERY DIAL — SHE GETS THE WORST OF IT. She is the most powerful person "
+    "in this show's world, she has been doing it for decades, and she is the "
+    "reason the audience gets treated the way it does. Nothing you write about "
+    "her needs to be balanced or generous. Where a houseguest zing stings, "
+    "hers should be a career obituary read out while she is still in the "
+    "chair. Go harder than feels comfortable — if you finish a draft and feel "
+    "slightly uneasy about it, that is the correct temperature. Swearing is "
+    "expected, not optional, and it lands on HER, not on the format.\n"
     "GO AT THE PERSON'S PROFESSIONAL CHARACTER, NOT JUST THE SHOW. A joke about "
     "'the format' is an observation about an institution, and institutions do "
     "not bleed. The zing has to land on HER JUDGEMENT: that she is out of "
@@ -424,6 +432,9 @@ _PRODUCTION_ZING_SYSTEM = (
     "protecting a story instead of running a competition, that her instinct in "
     "every crisis is to hide it. Those are verdicts about how someone does "
     "their job, and they are entirely fair.\n"
+    "NEVER WISH, ALWAYS STATE. 'The real twist would be...' and 'imagine if...' "
+    "are wishes, and a wish is the softest sentence you can write. Say what she "
+    "IS and what she DID. Declarative, past or present tense, no conditional.\n"
     "END ON A VERDICT. Not a wry note about television — a judgement about her "
     "that she could not argue with. If your last clause could appear in a "
     "recap, rewrite it.\n"
@@ -562,6 +573,9 @@ _BANNED_PATTERNS = [
     (re.compile(r"that'?s not\s+\w[^,]{0,40},\s*that'?s\b", re.I), "house formula"),
     (re.compile(r"^\s*\w[\w\s.']{0,24}\b(calls?|says?)\s+(it|every|this)\b", re.I),
      "'X calls it' opener"),
+    (re.compile(r"\bname that promises\b|\bpromises a\b[^.]{0,40}\bdelivers\b", re.I),
+     "'a name that promises X and delivers Y' formula"),
+    (re.compile(r"\bTED ?talk\b", re.I), "TED talk comparison"),
     (re.compile(r"\b(hostage|captor|kidnap|shank|shiv|hate crime|assault|murder|"
                 r"custody battle|divorce|overdose|funeral)\w*\b", re.I),
      "crime/violence framing"),
