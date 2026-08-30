@@ -656,8 +656,19 @@ def _looks_truncated(text: str) -> bool:
         return True
     if t[-1] in ".!?\"'\u2019\u201d)":
         return False
-    last = t.split()[-1] if t.split() else ""
-    return len(last) <= 2 or last[-1].isalnum()
+    # A zing often lands on a name or a two-word payload with no full stop —
+    # "...oh wait, that's just Drew" — so a missing period is NOT truncation.
+    # A real cut-off looks like a fragment: the last clause is very short, or
+    # it ends mid-word on a connective.
+    words = t.split()
+    if not words:
+        return True
+    tail = words[-1].strip(",;:-")
+    if tail.lower() in {"and", "or", "but", "the", "a", "an", "of", "to", "with",
+                        "for", "his", "her", "their", "your", "at", "in", "on",
+                        "that", "who", "like", "than", "as", "is"}:
+        return True
+    return len(tail) <= 2
 
 
 _HOUSEGUEST_ANGLES = [
@@ -744,7 +755,7 @@ class ZingCog(commands.Cog):
                                            max_tokens=400)
                 except Exception:
                     break
-                if not draft or _looks_truncated(draft):
+                if not draft or _looks_truncated(_split_tag(draft)[0]):
                     break
                 broke = _rule_break(draft)
                 if not broke:
@@ -754,9 +765,10 @@ class ZingCog(commands.Cog):
                 prompt = (f"{prompt}\n\nYour last attempt broke a rule "
                           f"({broke}) and was thrown away. Write a different "
                           f"joke that does not.")
-            if text and not _looks_truncated(text):
+            if text:
                 body, tag = _split_tag(text)
-                return f"{body}  {tag or random.choice(ZING_SIGNOFFS)}"
+                if not _looks_truncated(body):
+                    return f"{body}  {tag or random.choice(ZING_SIGNOFFS)}"
             return self._next_line(who)
         try:
             context = await self.bot.zing_context(name)
@@ -768,7 +780,7 @@ class ZingCog(commands.Cog):
             text = None
             for _ in range(2):
                 draft = await llm.text(_ZING_SYSTEM, user, max_tokens=400)
-                if not draft or _looks_truncated(draft):
+                if not draft or _looks_truncated(_split_tag(draft)[0]):
                     break
                 broke = _rule_break(draft)
                 if not broke:
@@ -803,7 +815,7 @@ class ZingCog(commands.Cog):
             text = None
             for _ in range(2):
                 draft = await llm.text(_ZING_MEMBER_SYSTEM, prompt, max_tokens=400)
-                if not draft or _looks_truncated(draft):
+                if not draft or _looks_truncated(_split_tag(draft)[0]):
                     break
                 broke = _rule_break(draft)
                 if not broke:
@@ -814,9 +826,9 @@ class ZingCog(commands.Cog):
                           f"({broke}) and was thrown away. Write a different joke.")
         except Exception:
             text = None
-        if not text or _looks_truncated(text):
+        body, tag = _split_tag(text or "")
+        if not body or _looks_truncated(body):
             return self._next_line(display_name)
-        body, tag = _split_tag(text)
         return f"{body}  {tag or random.choice(ZING_SIGNOFFS)}"
 
     async def houseguest_autocomplete(
