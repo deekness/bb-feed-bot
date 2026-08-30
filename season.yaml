@@ -82,7 +82,7 @@ markets:
     title_contains: "Week {week} elimination"
     watch: "rise"
 market_min_drop: 8
-market_min_volume: 100
+market_min_volume: 1000
 market_min_price: 6
 
 # How often to roast production while the feeds are dark (hours).
