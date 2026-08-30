@@ -66,7 +66,7 @@ class Season:
     kalshi_event_ticker: str = ""         # legacy single winner market
     markets: list = field(default_factory=list)  # [{label, ticker, watch}]
     market_min_drop: int = 8              # cents/points of drop to care about
-    market_min_volume: int = 100          # contracts traded alongside the drop
+    market_min_volume: int = 1000          # contracts traded alongside the drop
     market_min_price: int = 6             # ignore players already priced out
     market_lookback_minutes: int = 45   # alert on moves over this span
     blackout_roast_hours: int = 2         # how often to roast a long blackout
@@ -128,7 +128,7 @@ class Season:
             kalshi_event_ticker=str(data.get("kalshi_event_ticker", "") or ""),
             markets=list(data.get("markets") or []),
             market_min_drop=int(data.get("market_min_drop", 8)),
-            market_min_volume=int(data.get("market_min_volume", 100)),
+            market_min_volume=int(data.get("market_min_volume", 1000)),
             market_min_price=int(data.get("market_min_price", 6)),
             market_lookback_minutes=int(
                 data.get("market_lookback_minutes", 45)),
