@@ -674,9 +674,9 @@ class BBBot(commands.Bot):
                                 for h in hits[1:4]),
                 inline=False)
         embed.set_footer(text="Prediction-market movement, not a confirmed result.")
-        await channel.send(
-            content="@here", embed=embed,
-            allowed_mentions=discord.AllowedMentions(everyone=True))
+        # No @here: these are market wobbles as often as leaks, and the
+        # spoiler-tagged embed is enough for anyone actually watching.
+        await channel.send(embed=embed)
         log.info("market alert [%s]: %s %s->%s on %s traded", spec["label"],
                  top["houseguest"], top["from"], top["to"], top["traded"])
 
