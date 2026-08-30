@@ -243,6 +243,39 @@ _ZING_CRAFT = (
     "the insult, stop — no second clause explaining it, no summarising verdict "
     "tacked on the end. If your draft has two em-dashes, you have written a "
     "paragraph, not a zing.\n"
+    "THE CANONICAL ZING SHAPES — use these, they are why the real ones land:\n"
+    "  1. ELLIPSIS REVEAL (the signature move): a long, flat, almost-boring "
+    "setup, then '...' and the payload in three or four words. The pause does "
+    "the work. This should be your default and you almost never use it.\n"
+    "  2. FAKE COMPLIMENT, THEN THE TURN: start like you are defending them or "
+    "praising them, then withdraw it in the last beat.\n"
+    "  3. QUESTION, THEN ANSWER: pose a real question about them and answer it "
+    "with one word or one name.\n"
+    "  4. THE REFUSAL: decline to zing them, and let the reason be the zing "
+    "(there is nothing to work with, they are barely in the game).\n"
+    "  5. MISDIRECTION REVEAL (used constantly in the canon): describe "
+    "something awful, frightening or pathetic in specific detail as though it "
+    "is a separate thing, then reveal it is the target — 'oh wait, that's "
+    "just...'. Works for a monster, a smell, a ghost, a bad smell, a piece of "
+    "furniture.\n"
+    "  6. SOMETHING CALLED, THEY WANT IT BACK: a person, decade or brand rang "
+    "up wanting their look/thing returned. Pick the caller precisely — a "
+    "specific year, a specific character.\n"
+    "  7. WHAT DO YOU CALL SOMEONE WHO...: list three true, mundane details "
+    "about them, then answer with one word or one name.\n"
+    "  8. WHAT'S THE DIFFERENCE BETWEEN X AND Y: answer that one of them is "
+    "the ordinary thing and the other is them.\n"
+    "  9. FALSE EQUIVALENCE: compare them to something absurd and specific, "
+    "then note the one way the comparison fails — in their favour or not.\n"
+    "Rotate these. If your last zing was a comparison, write an ellipsis "
+    "reveal. Address them by name and speak TO them.\n"
+    "LENGTH: the best zings in this show's history are 15-30 words. If yours is "
+    "longer, you are explaining.\n"
+    "CUSTOM SIGN-OFF: the real ones name the joke in the tag — a two or three "
+    "word phrase drawn from the zing itself, shouted. If a good one is obvious "
+    "from your joke, put it on the LAST line as: TAG: <THE PHRASE> ZING! "
+    "If nothing fits, leave the TAG line off entirely and a stock one is used. "
+    "Never force it.\n"
     "ONE SHAPE WORTH KNOWING: state something flat and true about the season, "
     "then file the target under it as though it belongs to that category — "
     "listing their haircut among the season's punishments, counting them among "
@@ -593,6 +626,28 @@ def _rule_break(text: str) -> str | None:
     return None
 
 
+_TAG_LINE = re.compile(r"^\s*TAG:\s*(.+?)\s*$", re.I | re.M)
+
+
+def _split_tag(text: str) -> tuple[str, str | None]:
+    """Pull an optional custom sign-off off the end of a draft.
+
+    The canon's tags name the joke — POOR MAN'S CODY ZING, SASQUATCH ZING —
+    rather than shouting a generic one. When the model supplies one, use it;
+    otherwise fall back to the stock list.
+    """
+    m = _TAG_LINE.search(text or "")
+    if not m:
+        return (text or "").strip(), None
+    tag = m.group(1).strip().strip('"')
+    body = _TAG_LINE.sub("", text).strip()
+    if not tag or len(tag) > 60 or not body:
+        return body or (text or "").strip(), None
+    if "zing" not in tag.lower():
+        tag = f"{tag} ZING!"
+    return body, tag.upper()
+
+
 def _looks_truncated(text: str) -> bool:
     """A zing cut off mid-sentence — the model hit the token ceiling. Appending
     'ZING!' to a fragment reads like a bug, because it is one."""
@@ -700,7 +755,8 @@ class ZingCog(commands.Cog):
                           f"({broke}) and was thrown away. Write a different "
                           f"joke that does not.")
             if text and not _looks_truncated(text):
-                return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
+                body, tag = _split_tag(text)
+                return f"{body}  {tag or random.choice(ZING_SIGNOFFS)}"
             return self._next_line(who)
         try:
             context = await self.bot.zing_context(name)
@@ -725,7 +781,8 @@ class ZingCog(commands.Cog):
             text = None
         if not text:
             return self._next_line(name)
-        return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
+        body, tag = _split_tag(text)
+        return f"{body}  {tag or random.choice(ZING_SIGNOFFS)}"
 
     async def _member_line(self, display_name: str) -> str:
         """LLM-written roast of a server member; template if the LLM is down.
@@ -759,7 +816,8 @@ class ZingCog(commands.Cog):
             text = None
         if not text or _looks_truncated(text):
             return self._next_line(display_name)
-        return f"{text.strip()}  {random.choice(ZING_SIGNOFFS)}"
+        body, tag = _split_tag(text)
+        return f"{body}  {tag or random.choice(ZING_SIGNOFFS)}"
 
     async def houseguest_autocomplete(
         self, interaction: discord.Interaction, current: str
