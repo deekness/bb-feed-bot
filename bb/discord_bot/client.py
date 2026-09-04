@@ -70,9 +70,37 @@ ANT_LINES = [
     "Quiet hour. Production has still not addressed the ants. The ants know this.",
     "Zero updates. The ants have declared themselves Head of Household by squatter's rights.",
     "Feeds are sleepy. The ants are the only ones campaigning right now.",
+    "Nothing doing. The ants have been in this house longer than anyone and have never been nominated.",
+    "Quiet. An ant carried a crumb across the counter and it was the best gameplay of the hour.",
+    "No movement. The ants are running a final two that has held since June.",
+    "Dead air. The ants have a better read on this house than anyone actually playing.",
+    "Nothing to report. Somewhere an ant is taking the last slice of bread and nobody will ever suspect it.",
+    "All quiet. The ants have never once thrown a comp and it shows.",
+    "Silence. The ants are the only alliance in this house that has not fractured.",
+    "No updates. An ant just walked the entire perimeter unnoticed, which is more than most of them managed this week.",
+    "Feeds are still. The ants held a veto ceremony and did not tell anyone.",
+    "Nothing. The ants have gone to the have-not room voluntarily, which tells you about the food situation.",
+    "Quiet hour. The ants are not campaigning, not scheming, not crying — just working. Take notes.",
+    "No activity. The ants have been quietly building a jury case all summer.",
+    "Still nothing. An ant has claimed the HOH bed and there is no one to remove it.",
+    "Empty feeds. The ants remain undefeated in the kitchen, the pantry and the bathroom.",
+    "Nothing happening. The ants have never needed a twist to stay interesting.",
+    "Quiet. Two ants met by the memory wall and neither of them mentioned the other's name.",
+    "No updates. The ants do not need slop, do not need sleep, and do not need America's vote.",
+    "Feeds are flat. The ants are the only ones who came here to actually play.",
+    "Silence on the feeds. An ant has been on the counter for forty minutes and nobody has noticed. Relatable.",
+    "Nothing to report. The ants have not said the phrase 'at the end of the day' once.",
+    "Quiet hour. The ants have already worked out who is going home and are simply too polite to say.",
+    "Dead feeds. The ants are running a flawless social game, largely by not talking.",
 ]
-ANT_SIGNOFF = ("Still quiet. Even the ants have gone to bed — I'll pipe back up "
-               "when something actually happens.")
+ANT_SIGNOFFS = [
+    "Still quiet. Even the ants have gone to bed — I'll pipe back up when something actually happens.",
+    "Third quiet hour running. The ants have clocked off too. Back when the house does something.",
+    "Nothing again. I'm going to stop narrating an empty kitchen — shout when the feeds wake up.",
+    "Still nothing. Even the ants have stopped pretending this is content. See you when it moves.",
+    "That's three. I'll leave you and the ants to it until the house remembers it is on television.",
+]
+ANT_SIGNOFF = ANT_SIGNOFFS[0]
 
 
 class BBBot(commands.Bot):
@@ -1397,7 +1425,8 @@ class BBBot(commands.Bot):
             if self._in_season() and self._quiet_streak <= 3:
                 channel = await self.update_channel()
                 if channel:
-                    line = ANT_SIGNOFF if self._quiet_streak == 3 else self._next_ant_line()
+                    line = (random.choice(ANT_SIGNOFFS) if self._quiet_streak == 3
+                            else self._next_ant_line())
                     await channel.send(embed=discord.Embed(
                         title=f"🐜 House Summary — {hour_end.strftime('%I %p').lstrip('0')}",
                         description=line, color=0x95A5A6,
