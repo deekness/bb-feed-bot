@@ -31,7 +31,7 @@ from ..config import Season, Settings
 from ..db import Database
 from ..ingest.bluesky import BlueskySource
 from ..ingest.kalshi import KalshiWatcher, detect_moves, find_event
-from .zings import PRODUCTION_ROAST_ANGLES, production_roast
+from .zings import _split_tag, PRODUCTION_ROAST_ANGLES, production_roast
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
                                 FeedStateMonitor, duration_in,
                                 duration_minutes, strip_hashtags)
@@ -740,6 +740,11 @@ class BBBot(commands.Bot):
     async def _maybe_roast_the_blackout(self) -> None:
         if not self._in_season():
             return
+        # Opt-in only. Ordinary outages are hours long — a veto comp runs three,
+        # an individual comp six — so silence alone is not a reason to start
+        # roasting production. /blackout declares an abnormal one.
+        if not await self.db.kv_get("blackout_since"):
+            return
         now = dt.datetime.now(dt.timezone.utc)
         down_for = 0.0
 
@@ -803,9 +808,12 @@ class BBBot(commands.Bot):
             return
         await self.db.kv_set("blackout_roast_at",
                              dt.datetime.now(dt.timezone.utc).isoformat())
+        body, tag = _split_tag(text or "")
+        if tag:
+            body = f"{body}  {tag}"
         embed = discord.Embed(
             title=f"🪦 Still no feeds — hour {hours}",
-            description=text.strip(),
+            description=body,
             color=0xC0392B, timestamp=dt.datetime.now(self.tz))
         for ch in channels:
             try:
