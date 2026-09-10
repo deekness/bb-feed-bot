@@ -32,6 +32,7 @@ from ..db import Database
 from ..ingest.bluesky import BlueskySource
 from ..ingest.kalshi import KalshiWatcher, detect_moves, find_event
 from .zings import _split_tag, PRODUCTION_ROAST_ANGLES, production_roast
+from ..ingest.preview import PreviewWatcher
 from ..ingest.feedstate import (STATE_ANIPALS, STATE_LIVE, STATE_WBRB,
                                 FeedStateMonitor, duration_in,
                                 duration_minutes, strip_hashtags)
@@ -158,6 +159,8 @@ class BBBot(commands.Bot):
         sources = [self.rss_source, *extra,
                    BlueskySource(season.bluesky_accounts, self.roster, season.bb_keywords)]
         self.feedstate = FeedStateMonitor(season.feedstate_handle)
+        self.preview = (PreviewWatcher(season.preview_handle)
+                        if season.preview_handle else None)
         # Winner-market watcher: during a blackout a leaked result shows up as
         # a price collapse before it shows up anywhere readable.
         # One watcher per configured market. Each carries its own label and
@@ -239,6 +242,10 @@ class BBBot(commands.Bot):
         if self.season.feedstate_enabled:
             self.feedstate_loop.start()
             self.feeds_down_loop.start()
+            if self.preview is not None:
+                self.preview_loop.start()
+                log.info("watching %s for the Block Buster preview",
+                         self.season.preview_handle)
             if self.markets:
                 self.market_loop.start()
                 for m in self.markets:
@@ -584,6 +591,44 @@ class BBBot(commands.Bot):
     # this long down, ease off until something changes.
     FEEDSTATE_LONG_DOWN_S = 2 * 3600
     FEEDSTATE_POLL_LONG_S = 120
+
+    @tasks.loop(minutes=5)
+    async def preview_loop(self) -> None:
+        """Relay the Block Buster preview clip the moment it is posted."""
+        try:
+            await self._poll_preview()
+        except Exception as e:
+            log.error("preview loop error: %s", e)
+
+    @preview_loop.before_loop
+    async def _before_preview(self) -> None:
+        await self.wait_until_ready()
+
+    async def _poll_preview(self) -> None:
+        if self.preview is None or not self._in_season():
+            return
+        hit = await self.preview.latest()
+        if not hit:
+            return
+        if await self.db.kv_get("preview_last_uri") == hit["uri"]:
+            return                            # already relayed this one
+        await self.db.kv_set("preview_last_uri", hit["uri"])
+        channel = await self._preview_channel()
+        if not channel:
+            return
+        await channel.send(
+            f"📺 **Tonight's Block Buster preview is up**\n{hit['url']}")
+        log.info("relayed Block Buster preview: %s", hit["url"])
+
+    async def _preview_channel(self):
+        cid = (await self.db.kv_get("preview_channel_id")
+               or self.season.preview_channel_id)
+        if cid:
+            ch = self.get_channel(int(cid))
+            if isinstance(ch, discord.TextChannel):
+                return ch
+            log.warning("preview channel %s not found", cid)
+        return await self.recap_channel()
 
     @tasks.loop(minutes=3)
     async def market_loop(self) -> None:
