@@ -278,3 +278,8 @@ episodes:
     start: "19:00"
     end: "20:00"
     live: false
+
+# This account posts the Block Buster competition preview the moment Big
+# Brother releases it, always worded "tonights BBBB! #BB28". Relay the link.
+preview_handle: "taylorallen133.bsky.social"
+preview_channel_id: 1394079968190795906
