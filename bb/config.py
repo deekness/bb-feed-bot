@@ -63,11 +63,15 @@ class Season:
     episode_air_windows: dict = field(default_factory=dict)
     feeds_back_min_minutes: int = 20      # suppress 'feeds are back' below this
     feeds_back_ping_minutes: int = 75     # @here only for outages this long
-    kalshi_event_ticker: str = ""         # winner market to watch for leaks
+    kalshi_event_ticker: str = ""         # legacy single winner market
+    markets: list = field(default_factory=list)  # [{label, ticker/title_contains, watch}]
     market_min_drop: int = 8              # cents/points of drop to care about
     market_min_volume: int = 100          # contracts traded alongside the drop
     market_min_price: int = 6             # ignore players already priced out
-    blackout_roast_hours: int = 6         # how often to roast a long blackout
+    market_lookback_minutes: int = 45     # compare against this far back
+    blackout_roast_hours: int = 2         # how often to roast a long blackout
+    blackout_roast_channel_ids: list = field(default_factory=list)
+    show_time_capsule: bool = False       # the six-week twist is over
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -124,10 +128,15 @@ class Season:
             feeds_back_min_minutes=int(data.get("feeds_back_min_minutes", 20)),
             feeds_back_ping_minutes=int(data.get("feeds_back_ping_minutes", 75)),
             kalshi_event_ticker=str(data.get("kalshi_event_ticker", "") or ""),
+            markets=list(data.get("markets") or []),
             market_min_drop=int(data.get("market_min_drop", 8)),
             market_min_volume=int(data.get("market_min_volume", 100)),
             market_min_price=int(data.get("market_min_price", 6)),
-            blackout_roast_hours=int(data.get("blackout_roast_hours", 6)),
+            market_lookback_minutes=int(data.get("market_lookback_minutes", 45)),
+            blackout_roast_hours=int(data.get("blackout_roast_hours", 2)),
+            blackout_roast_channel_ids=list(
+                data.get("blackout_roast_channel_ids") or []),
+            show_time_capsule=bool(data.get("show_time_capsule", False)),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
