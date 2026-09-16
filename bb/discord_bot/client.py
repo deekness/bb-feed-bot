@@ -1155,6 +1155,35 @@ class BBBot(commands.Bot):
         title = (getattr(u, "title", "") or "").lower()
         return "alliance" in title and ("report" in title or "deals" in title)
 
+    async def _jury_members(self) -> list[str]:
+        """Who is on the jury: evicted from the configured week on, plus anyone
+        marked by hand. Empty before the jury phase starts."""
+        marked = [r["houseguest"] for r in await self.db.fetch(
+            "SELECT houseguest FROM game_state WHERE role = 'jury' "
+            "ORDER BY week, set_at")]
+        # Naming the first juror beats naming a week: it survives the eviction
+        # being re-filed, and it splits a double-eviction week correctly, since
+        # everything recorded from that eviction onward is jury.
+        first = self.season.jury_starts_with
+        if first:
+            rows = await self.db.fetch(
+                """
+                SELECT houseguest FROM game_state
+                WHERE role = 'evicted' AND (week, set_at) >= (
+                    SELECT week, set_at FROM game_state
+                    WHERE role = 'evicted' AND lower(houseguest) = lower($1)
+                    ORDER BY week, set_at LIMIT 1)
+                ORDER BY week, set_at
+                """, first)
+            marked += [r["houseguest"] for r in rows]
+        elif self.season.jury_starts_week:
+            rows = await self.db.fetch(
+                "SELECT houseguest FROM game_state WHERE role = 'evicted' "
+                "AND week >= $1 ORDER BY week, set_at",
+                self.season.jury_starts_week)
+            marked += [r["houseguest"] for r in rows]
+        return list(dict.fromkeys(marked))
+
     async def house_context(self) -> str:
         """Short current-state block injected into extraction and summary
         prompts: week, game state, active alliances. Empty pre-roster."""
@@ -1170,6 +1199,13 @@ class BBBot(commands.Bot):
             twist = await self.db.kv_get("twist_note")
             if twist:
                 parts.append(f"ACTIVE TWIST: {twist}")
+            # From here on an eviction sends someone to the jury, which changes
+            # what campaigning and betrayal cost — the people you burn get a vote.
+            jury = await self._jury_members()
+            if jury:
+                parts.append(
+                    f"JURY PHASE: {', '.join(jury)} are on the jury and will vote "
+                    "for the winner. Anyone evicted from now on joins them.")
             state = await self.game_state.current(week)
             for role, names in state.items():
                 parts.append(f"{_ROLE_LABELS.get(role, role)}: {', '.join(names)}.")

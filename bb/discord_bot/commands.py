@@ -302,11 +302,24 @@ class BBCommands(commands.Cog):
         # Evictions are cumulative — the jury/graveyard is season-long, not a
         # per-week fact, so show everyone who has left in the order they went.
         gone = await self.bot.db.fetch(
-            "SELECT houseguest FROM game_state WHERE role = 'evicted' "
+            "SELECT houseguest, week FROM game_state WHERE role = 'evicted' "
             "ORDER BY week, set_at")
-        names = list(dict.fromkeys(r["houseguest"] for r in gone))
-        if names:
-            lines.append(f"🚪 **Evicted**  {', '.join(names)}")
+        # Once the jury starts, an eviction means something different — those
+        # houseguests still decide the winner. Anyone evicted from the
+        # configured week on is jury, plus anyone marked one by hand.
+        jury_set = set(await self.bot._jury_members())
+        pre, jury = [], []
+        for r in gone:
+            hg = r["houseguest"]
+            if hg in pre or hg in jury:
+                continue
+            (jury if hg in jury_set else pre).append(hg)
+        # Jury first: they still decide the winner, so they matter more to the
+        # game than the people who left before the votes started counting.
+        if jury:
+            lines.append(f"⚖️ **Jury**  {', '.join(jury)}")
+        if pre:
+            lines.append(f"🚪 **Evicted**  {', '.join(pre)}")
 
         embed.description = "\n".join(lines)
         await interaction.followup.send(embed=embed)
@@ -835,7 +848,8 @@ class BBCommands(commands.Cog):
         role = role.strip().lower()
         valid = ("hoh", "nominee", "veto_winner", "veto_used_on", "evicted",
                  "replacement_nominee", "have_not", "block_buster",
-                 "time_capsule", "time_capsule_power", "time_capsule_punishment")
+                 "time_capsule", "time_capsule_power", "time_capsule_punishment",
+                 "jury")
         if role not in valid:
             await interaction.response.send_message(
                 f"Role must be one of: {', '.join(valid)}", ephemeral=True)
