@@ -72,6 +72,8 @@ class Season:
     blackout_roast_hours: int = 2         # how often to roast a long blackout
     blackout_roast_channel_ids: list = field(default_factory=list)
     show_time_capsule: bool = False       # the six-week twist is over
+    jury_starts_week: int = 0             # evictions from this week on are jury
+    jury_starts_with: str = ""            # ...or name the first juror instead
     episodes: list[dict] = field(default_factory=list)
     feedstate_enabled: bool = True
     feedstate_handle: str = "feed-bot.bsky.social"
@@ -137,6 +139,8 @@ class Season:
             blackout_roast_channel_ids=list(
                 data.get("blackout_roast_channel_ids") or []),
             show_time_capsule=bool(data.get("show_time_capsule", False)),
+            jury_starts_week=int(data.get("jury_starts_week", 0)),
+            jury_starts_with=str(data.get("jury_starts_with", "") or "").strip(),
             roster=[str(n).strip() for n in (data.get("roster") or [])],
             nicknames={str(k).lower(): str(v) for k, v in (data.get("nicknames") or {}).items()},
             bluesky_accounts=[str(a).strip() for a in (data.get("bluesky_accounts") or [])],
