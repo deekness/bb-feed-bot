@@ -419,6 +419,11 @@ class Extractor:
         data = await self.llm.structured(
             system, user, tool_name=_TOOL_NAME, tool_description=_TOOL_DESCRIPTION,
             schema=_SCHEMA, max_tokens=2000,
+            # The prefix above (tool schema + system prompt) is ~2,600 tokens and
+            # identical on every cycle — the roster only shifts on an eviction
+            # and the episode-airing block only twice a day. Everything that
+            # changes per call is in `user`, which sits outside the cache.
+            cache_system=True,
         )
         if not data:
             return Extraction()
